@@ -1,0 +1,13 @@
+# AI REXI — Dependency & Build Artifacts
+node_modules/
+dist/
+.env
+*.log
+npm-debug.log*
+
+# Database (chỉ giữ schema, không commit dữ liệu thật)
+Database/tro_ly_ai.db
+
+# OS
+.DS_Store
+Thumbs.db
