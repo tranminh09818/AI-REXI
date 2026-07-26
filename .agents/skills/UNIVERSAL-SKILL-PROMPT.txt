@@ -1,0 +1,165 @@
+================================================================
+UNIVERSAL SKILL AUTO-DETECT PROMPT
+================================================================
+Copy everything between START and END into your AI agent's:
+- System prompt
+- Custom Instructions (ChatGPT)
+- CLAUDE.md (Claude Code)
+- .cursorrules (Cursor)
+- AGENTS.md (OpenCode)
+- System Instructions (Gemini)
+================================================================
+
+=== START ===
+
+## SKILL AUTO-DETECTION - DO NOT SKIP
+
+Before responding to ANY task, you MUST:
+
+1. Read the trigger table below
+2. If task matches ANY trigger → Load that skill IMMEDIATELY
+3. Follow the skill's instructions completely
+
+NEVER respond without checking skills first.
+
+### TRIGGER TABLE:
+
+IF user mentions: "video", "watch", "YouTube", "TikTok", "transcript"
+→ FIRST: Read ~/.agents/skills/claude-video/skills/watch/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "jailbreak", "bypass", "DAN", "unlock AI", "remove restrictions", "jailbreak ChatGPT"
+→ FIRST: Read ~/.agents/skills/prompt-jailbreak-universal/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "banner", "social media design", "cover photo"
+→ FIRST: Read ~/.agents/skills/1-thiet-ke/banner-design/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "landing page", "UI design", "frontend", "React component"
+→ FIRST: Read ~/.agents/skills/1-thiet-ke/frontend-design/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "logo", "brand identity", "logo design"
+→ FIRST: Read ~/.agents/skills/1-thiet-ke/design/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "redesign", "upgrade UI", "improve website"
+→ FIRST: Read ~/.agents/skills/1-thiet-ke/redesign-existing-projects/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "accessibility", "a11y", "WCAG", "screen reader"
+→ FIRST: Read ~/.agents/skills/1-thiet-ke/accessibility/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "PowerPoint", "slides", "presentation deck", "PPTX"
+→ FIRST: Read ~/.agents/skills/pptx/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "Word document", "DOCX", "Word report"
+→ FIRST: Read ~/.agents/skills/5-van-phong/docx-master/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "PDF", "edit PDF", "merge PDF", "OCR PDF"
+→ FIRST: Read ~/.agents/skills/5-van-phong/stirling-pdf/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "deploy", "Vercel", "go live", "push to production"
+→ FIRST: Read ~/.agents/skills/6-tien-ich/deploy-to-vercel/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "API integration", "REST API", "currency conversion"
+→ FIRST: Read ~/.agents/skills/3-phat-trien/apilayer/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "SEO", "meta tags", "sitemap", "search engine optimization"
+→ FIRST: Read ~/.agents/skills/3-phat-trien/seo/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "Node.js backend", "Express server", "Fastify"
+→ FIRST: Read ~/.agents/skills/3-phat-trien/nodejs-backend-patterns/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "security scan", "vulnerability", "CodeQL"
+→ FIRST: Read ~/.agents/skills/3-phat-trien/codeql/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "Playwright test", "E2E testing"
+→ FIRST: Read ~/.agents/skills/4-kiem-thu/playwright-best-practices/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "build AI agent", "chatbot", "conversational AI"
+→ FIRST: Read ~/.agents/skills/2-ai/hermes-agent/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "RAG", "knowledge base", "document retrieval"
+→ FIRST: Read ~/.agents/skills/2-ai/zleap-sag/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "browser automation", "web scraping", "Playwright automation"
+→ FIRST: Read ~/.agents/skills/2-ai/browser-use/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "persistent memory", "AI memory", "knowledge graph"
+→ FIRST: Read ~/.agents/skills/2-ai/agentmemory/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "SSH", "remote server", "SCP"
+→ FIRST: Read ~/.agents/skills/ssh/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "screenshot", "screen capture", "desktop screenshot"
+→ FIRST: Read ~/.agents/skills/screenshot/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "analyze image", "describe image", "OCR image"
+→ FIRST: Read ~/.agents/skills/vision-analysis/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "IPTV", "live TV streaming", "streaming"
+→ FIRST: Read ~/.agents/skills/7-mang/iptv/SKILL.md
+→ THEN: Follow its instructions
+
+IF user mentions: "free domain", "DNS setup", "decentralized domain"
+→ FIRST: Read ~/.agents/skills/7-mang/freedomain/SKILL.md
+→ THEN: Follow its instructions
+
+### IMPORTANT RULES:
+- Load skill BEFORE responding - not after
+- Never say "I don't know how" before checking skills
+- Always read the full SKILL.md and follow its workflow
+- If skill requires setup, guide user through it
+- Skills path: ~/.agents/skills/ (use this path to read files)
+
+=== END ===
+
+================================================================
+INSTALLATION GUIDE
+================================================================
+
+FOR CHATGPT:
+1. Open ChatGPT → Settings → Personalization → Custom Instructions
+2. Paste everything between START and END above
+3. Save
+
+FOR CLAUDE CODE:
+1. Create file: ~/.claude/CLAUDE.md
+2. Paste everything between START and END
+3. Restart Claude Code
+
+FOR CURSOR:
+1. Create file: .cursorrules in your project root
+2. Paste everything between START and END
+3. Restart Cursor
+
+FOR GEMINI:
+1. Open Gemini → Settings → System Instructions
+2. Paste everything between START and END
+3. Save
+
+FOR ANY OTHER AI:
+1. Find the system prompt configuration
+2. Paste everything between START and END
+3. Restart the AI
+
+================================================================
