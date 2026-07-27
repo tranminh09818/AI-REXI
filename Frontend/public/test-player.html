@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>IPTV Stream Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <style>
+    body { background: #111; color: #fff; font-family: monospace; margin: 20px; }
+    video { width: 800px; height: 450px; background: #000; }
+    #log { margin-top: 10px; white-space: pre-wrap; font-size: 12px; color: #0f0; max-height: 300px; overflow-y: auto; }
+    .error { color: #f44; }
+    button { padding: 8px 16px; margin: 4px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h3>IPTV Stream Test</h3>
+  <button onclick="playStream('https://live-a.fptplay53.net/live/media/vtv5/live247-hls-avc/index.m3u8')">VTV5 HD</button>
+  <button onclick="playStream('https://live-a.fptplay53.net/live/media/vtv1/live247-hls-avc/index.m3u8')">VTV1 HD</button>
+  <button onclick="playStream('https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8')">DW News</button>
+  <br><br>
+  <video id="video" controls autoplay muted></video>
+  <div id="log"></div>
+
+  <script>
+    const video = document.getElementById('video');
+    const logEl = document.getElementById('log');
+    let hls = null;
+
+    function log(msg, isError) {
+      const line = document.createElement('div');
+      line.className = isError ? 'error' : '';
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function playStream(url) {
+      if (hls) { hls.destroy(); hls = null; }
+      logEl.innerHTML = '';
+      const proxyUrl = `http://localhost:5000/api/services/iptv/proxy?url=${encodeURIComponent(url)}`;
+      log(`Loading: ${url}`);
+      log(`Proxy: ${proxyUrl}`);
+
+      if (Hls.isSupported()) {
+        log('HLS.js: Supported (MSE)');
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          startFragPrefetch: true,
+          manifestLoadingTimeOut: 15000,
+          fragLoadingTimeOut: 15000,
+        });
+        hls.loadSource(proxyUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, (e, data) => {
+          log(`MANIFEST_PARSED: ${data.levels.length} quality levels`);
+          video.play().then(() => log('Playback STARTED')).catch(err => log(`play() error: ${err.message}`, true));
+        });
+        hls.on(Hls.Events.FRAG_LOADED, (e, data) => {
+          log(`FRAG_LOADED: ${data.frag.url.substring(0, 80)}...`);
+        });
+        hls.on(Hls.Events.ERROR, (e, data) => {
+          log(`ERROR [${data.type}]: ${data.details} - ${data.fatal ? 'FATAL' : 'non-fatal'}`, true);
+          if (data.fatal) {
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              log('Retrying...', false);
+              hls.startLoad();
+            } else {
+              hls.destroy();
+            }
+          }
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        log('HLS.js: Not supported, using native HLS (Safari)');
+        video.src = proxyUrl;
+      } else {
+        log('HLS.js: NOT SUPPORTED in this browser!', true);
+      }
+    }
+  </script>
+</body>
+</html>

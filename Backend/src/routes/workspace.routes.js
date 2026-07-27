@@ -3,9 +3,24 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 
+const rootDir = path.resolve(__dirname, '..', '..', '..');
+
+function resolveWorkspacePath(relativePath) {
+  if (typeof relativePath !== 'string' || !relativePath.trim()) {
+    throw new Error('Missing file path');
+  }
+
+  const fullPath = path.resolve(rootDir, relativePath);
+  const relative = path.relative(rootDir, fullPath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    const error = new Error('File path must remain inside the workspace');
+    error.statusCode = 403;
+    throw error;
+  }
+  return fullPath;
+}
+
 router.get('/files', (req, res) => {
-  const rootDir = path.join(__dirname, '..', '..', '..');
-  
   function scanDir(dirPath, relativeDir = '') {
     const items = fs.readdirSync(dirPath, { withFileTypes: true });
     const result = [];
@@ -38,22 +53,32 @@ router.get('/files', (req, res) => {
     const fileTree = scanDir(rootDir);
     res.json(fileTree);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
+
+// Helper: validate path không thoát khỏi rootDir (chống path traversal)
+function safePath(rootDir, relPath) {
+  const fullPath = path.resolve(rootDir, relPath);
+  if (!fullPath.startsWith(path.resolve(rootDir))) {
+    return null; // path traversal detected
+  }
+  return fullPath;
+}
 
 router.get('/file-content', (req, res) => {
   const relPath = req.query.path;
   if (!relPath) return res.status(400).json({ error: 'Missing file path' });
 
   const rootDir = path.join(__dirname, '..', '..', '..');
-  const fullPath = path.join(rootDir, relPath);
+  const fullPath = safePath(rootDir, relPath);
+  if (!fullPath) return res.status(403).json({ error: 'Path không hợp lệ (path traversal detected)' });
 
   try {
     const content = fs.readFileSync(fullPath, 'utf-8');
     res.json({ path: relPath, content });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -62,13 +87,14 @@ router.post('/file-content', (req, res) => {
   if (!relPath) return res.status(400).json({ error: 'Missing file path' });
 
   const rootDir = path.join(__dirname, '..', '..', '..');
-  const fullPath = path.join(rootDir, relPath);
+  const fullPath = safePath(rootDir, relPath);
+  if (!fullPath) return res.status(403).json({ error: 'Path không hợp lệ (path traversal detected)' });
 
   try {
     fs.writeFileSync(fullPath, content, 'utf-8');
     res.json({ success: true, path: relPath });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

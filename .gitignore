@@ -2,6 +2,7 @@
 # Node
 node_modules/
 dist/
+.nul
 nul
 
 # Logs
@@ -11,6 +12,7 @@ backend.log
 
 # Env & secrets
 .env
+.env.example
 *.db
 
 # Build

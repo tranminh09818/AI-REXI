@@ -1,169 +1,315 @@
 const express = require('express');
 const router = express.Router();
-const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const jwt = 'jsonwebtoken';
 const db = require('../config/db');
+const crypto = require('crypto');
+const { authMiddleware, adminMiddleware } = require('../middleware/auth.middleware');
 
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password + 'rexi_salt_2026').digest('hex');
+const JWT_SECRET = process.env.JWT_SECRET || 'your-very-secret-key-for-rexi-ai';
+
+function generateToken(user) {
+    const payload = { id: user.ma_nguoi_dung, role: user.phan_quyen };
+    return require(jwt).sign(payload, JWT_SECRET, { expiresIn: '7d' });
 }
 
-router.post('/auth/register', (req, res) => {
-  const { email, password, full_name } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email và mật khẩu không được để trống' });
-  }
+function sanitizeUser(user) {
+    return {
+        ma_nguoi_dung: user.ma_nguoi_dung,
+        email: user.email,
+        ten_day_du: user.ten_day_du,
+        phan_quyen: user.phan_quyen,
+        anh_dai_dien: user.anh_dai_dien || null
+    };
+}
 
-  const maUser = crypto.randomUUID();
-  const hashedPassword = hashPassword(password);
-  const tenDayDu = full_name || email.split('@')[0];
+// Tìm user hoặc tạo mới theo email
+function findOrCreateUser(email, name, avatar, provider, done) {
+    db.get("SELECT * FROM nguoi_dung WHERE email = ?", [email], (err, user) => {
+        if (err) return done(err);
+        if (user) {
+            // Cập nhật tên và ảnh nếu có
+            const updates = [];
+            const params = [];
+            if (name && name !== user.ten_day_du) { updates.push("ten_day_du = ?"); params.push(name); }
+            if (avatar && avatar !== user.anh_dai_dien) { updates.push("anh_dai_dien = ?"); params.push(avatar); }
+            if (updates.length > 0) {
+                params.push(user.ma_nguoi_dung);
+                db.run(`UPDATE nguoi_dung SET ${updates.join(', ')} WHERE ma_nguoi_dung = ?`, params, () => {
+                    user.ten_day_du = name || user.ten_day_du;
+                    user.anh_dai_dien = avatar || user.anh_dai_dien;
+                    done(null, user);
+                });
+            } else {
+                done(null, user);
+            }
+        } else {
+            const maUser = crypto.randomUUID();
+            const placeholderPass = crypto.randomBytes(16).toString('hex');
+            db.run(
+                "INSERT INTO nguoi_dung (ma_nguoi_dung, email, mat_khau_ma_hoa, ten_day_du, phan_quyen, anh_dai_dien) VALUES (?, ?, ?, ?, 'user', ?)",
+                [maUser, email, placeholderPass, name || email.split('@')[0], avatar || null],
+                function(err) {
+                    if (err) return done(err);
+                    done(null, {
+                        ma_nguoi_dung: maUser,
+                        email,
+                        ten_day_du: name || email.split('@')[0],
+                        phan_quyen: 'user',
+                        anh_dai_dien: avatar || null
+                    });
+                }
+            );
+        }
+    });
+}
 
-  db.get("SELECT ma_nguoi_dung FROM nguoi_dung WHERE email = ?", [email.trim().toLowerCase()], (err, row) => {
-    if (row) {
-      return res.status(400).json({ error: 'Email này đã được đăng ký tài khoản.' });
+// Đăng ký
+router.post('/register', async (req, res) => {
+    const { email, password, ten_day_du } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email và mật khẩu là bắt buộc.' });
     }
 
-    db.run(
-      `INSERT INTO nguoi_dung (ma_nguoi_dung, email, mat_khau_ma_hoa, ten_day_du, cai_dat_ca_nhan)
-       VALUES (?, ?, ?, ?, '{}')`,
-      [maUser, email.trim().toLowerCase(), hashedPassword, tenDayDu],
-      (err) => {
-        if (err) return res.status(500).json({ error: 'Lỗi đăng ký: ' + err.message });
-        
-        const maThuMuc = crypto.randomUUID();
-        db.run(
-          `INSERT INTO thu_muc_du_an (ma_thu_muc, ma_nguoi_dung, ten_thu_muc, duong_dan_may_tinh)
-           VALUES (?, ?, 'My Rexi Workspace', 'D:\\\\AI REXI')`,
-          [maThuMuc, maUser]
-        );
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const maUser = crypto.randomUUID();
 
-        res.json({
-          success: true,
-          user: { ma_nguoi_dung: maUser, email: email.trim().toLowerCase(), ten_day_du: tenDayDu }
+    db.run(
+        "INSERT INTO nguoi_dung (ma_nguoi_dung, email, mat_khau_ma_hoa, ten_day_du, phan_quyen) VALUES (?, ?, ?, ?, 'user')",
+        [maUser, email, hashedPassword, ten_day_du || 'Người dùng mới'],
+        (err) => {
+            if (err) {
+                return res.status(500).json({ error: 'Email này có thể đã tồn tại.' });
+            }
+            res.status(201).json({ success: true, message: 'Đăng ký thành công!' });
+        }
+    );
+});
+
+// Đăng nhập
+router.post('/login', (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Vui lòng nhập email và mật khẩu.' });
+    }
+
+    db.get("SELECT * FROM nguoi_dung WHERE email = ?", [email], async (err, user) => {
+        if (err || !user) {
+            return res.status(401).json({ error: 'Email hoặc mật khẩu không đúng.' });
+        }
+
+        const isMatch = await bcrypt.compare(password, user.mat_khau_ma_hoa);
+        if (!isMatch) {
+            return res.status(401).json({ error: 'Email hoặc mật khẩu không đúng.' });
+        }
+
+        const token = generateToken(user);
+        res.json({ success: true, token, user: sanitizeUser(user) });
+    });
+});
+
+// Đăng nhập Google - gui credential tu Google Identity Services
+router.post('/google', (req, res) => {
+    const { credential } = req.body;
+    if (!credential) {
+        return res.status(400).json({ error: 'Thiếu Google credential.' });
+    }
+
+    try {
+        // Decode Google JWT (Google's SDK tra ve JWT da verify)
+        // Header.payload.signature — payload chua user info
+        const parts = credential.split('.');
+        if (parts.length !== 3) {
+            return res.status(400).json({ error: 'Credential không hợp lệ.' });
+        }
+
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+
+        const email = payload.email;
+        const name = payload.name || payload.given_name || email.split('@')[0];
+        const avatar = payload.picture || null;
+
+        if (!email) {
+            return res.status(400).json({ error: 'Không lấy được email từ Google.' });
+        }
+
+        findOrCreateUser(email, name, avatar, 'google', (err, user) => {
+            if (err) {
+                console.error('[Auth] Google login error:', err);
+                return res.status(500).json({ error: 'Lỗi hệ thống khi đăng nhập Google.' });
+            }
+
+            const token = generateToken(user);
+            res.json({ success: true, token, user: sanitizeUser(user) });
         });
-      }
-    );
-  });
-});
 
-router.post('/auth/login', (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Vui lòng nhập Email và Mật khẩu' });
-  }
-
-  const hashedPassword = hashPassword(password);
-
-  db.get(
-    "SELECT ma_nguoi_dung, email, ten_day_du FROM nguoi_dung WHERE email = ? AND mat_khau_ma_hoa = ?",
-    [email.trim().toLowerCase(), hashedPassword],
-    (err, row) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (!row) {
-        return res.status(401).json({ error: 'Email hoặc mật khẩu không chính xác.' });
-      }
-
-      res.json({
-        success: true,
-        user: { ma_nguoi_dung: row.ma_nguoi_dung, email: row.email, ten_day_du: row.ten_day_du }
-      });
+    } catch (e) {
+        console.error('[Auth] Google credential decode error:', e);
+        return res.status(400).json({ error: 'Credential Google không hợp lệ.' });
     }
-  );
 });
 
-router.get('/auth/me', (req, res) => {
-  const userId = req.headers['x-user-id'];
-  if (!userId) return res.status(401).json({ error: 'Chưa đăng nhập' });
+// ==================== FORGOT / RESET PASSWORD ====================
 
-  db.get("SELECT ma_nguoi_dung, email, ten_day_du FROM nguoi_dung WHERE ma_nguoi_dung = ?", [userId], (err, row) => {
-    if (err || !row) return res.status(401).json({ error: 'Tài khoản không tồn tại' });
-    res.json({ user: row });
-  });
-});
-
-router.post('/auth/forgot-password', (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email không được để trống' });
-
-  db.get("SELECT ma_nguoi_dung, ten_day_du FROM nguoi_dung WHERE email = ?", [email.trim().toLowerCase()], (err, row) => {
-    if (!row) {
-      return res.status(404).json({ error: 'Email này chưa được đăng ký tài khoản.' });
+// Quên mật khẩu — tạo OTP code 6 số
+router.post('/forgot-password', (req, res) => {
+    const { email } = req.body;
+    if (!email) {
+        return res.status(400).json({ error: 'Vui lòng nhập email.' });
     }
 
-    const newPassword = Math.random().toString(36).slice(-8).toUpperCase();
-    const hashedNew = hashPassword(newPassword);
+    db.get("SELECT * FROM nguoi_dung WHERE email = ?", [email], (err, user) => {
+        // Luôn trả về thành công để tránh leak email tồn tại
+        if (err || !user) {
+            return res.json({ success: true, message: 'Nếu email tồn tại, vui lòng kiểm tra mã OTP.' });
+        }
 
-    db.run("UPDATE nguoi_dung SET mat_khau_ma_hoa = ? WHERE email = ?", [hashedNew, email.trim().toLowerCase()], (err2) => {
-      if (err2) return res.status(500).json({ error: err2.message });
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 phut
 
-      console.log('[Auth] Password reset for', email, '→ New temp password:', newPassword);
-
-      res.json({
-        success: true,
-        message: 'Mật khẩu tạm thời đã được tạo thành công.',
-        _dev_temp_password: newPassword
-      });
+        db.run(
+            "UPDATE nguoi_dung SET otp_code = ?, otp_expiry = ? WHERE ma_nguoi_dung = ?",
+            [otpCode, otpExpiry, user.ma_nguoi_dung],
+            (err) => {
+                if (err) {
+                    return res.status(500).json({ error: 'Lỗi hệ thống.' });
+                }
+                // Trong production gửi email, o day tra ve truc tiep de debug
+                console.log(`[Auth] OTP for ${email}: ${otpCode}`);
+                res.json({ success: true, message: 'Mã OTP đã được tạo.', otp_debug: otpCode });
+            }
+        );
     });
-  });
 });
 
-router.post('/auth/google', async (req, res) => {
-  const { credential, email, name, picture } = req.body;
-  if (!email) return res.status(400).json({ error: 'Thiếu thông tin Google OAuth' });
-
-  const maUserGoogle = 'google_' + crypto.createHash('md5').update(email).digest('hex');
-
-  db.get("SELECT * FROM nguoi_dung WHERE email = ?", [email.toLowerCase()], (err, existing) => {
-    if (existing) {
-      return res.json({ success: true, user: { ma_nguoi_dung: existing.ma_nguoi_dung, email: existing.email, ten_day_du: existing.ten_day_du, avatar_url: picture || null, provider: 'google' } });
+// Xác nhận OTP và đặt mật khẩu mới
+router.post('/reset-password', async (req, res) => {
+    const { email, otp_code, new_password } = req.body;
+    if (!email || !otp_code || !new_password) {
+        return res.status(400).json({ error: 'Vui lòng nhập đầy đủ thông tin.' });
+    }
+    if (new_password.length < 6) {
+        return res.status(400).json({ error: 'Mật khẩu mới tối thiểu 6 ký tự.' });
     }
 
-    db.run(
-      `INSERT OR IGNORE INTO nguoi_dung (ma_nguoi_dung, email, mat_khau_ma_hoa, ten_day_du, cai_dat_ca_nhan)
-       VALUES (?, ?, 'google_oauth_no_password', ?, '{}')`,
-      [maUserGoogle, email.toLowerCase(), name || email.split('@')[0]],
-      (err2) => {
-        if (err2) return res.status(500).json({ error: err2.message });
-        res.json({ success: true, user: { ma_nguoi_dung: maUserGoogle, email: email.toLowerCase(), ten_day_du: name || email.split('@')[0], avatar_url: picture || null, provider: 'google' } });
-      }
-    );
-  });
-});
+    db.get("SELECT * FROM nguoi_dung WHERE email = ?", [email], async (err, user) => {
+        if (err || !user) {
+            return res.status(400).json({ error: 'Email không tồn tại.' });
+        }
 
-router.delete('/admin/users/:ma_nguoi_dung', (req, res) => {
-  const { ma_nguoi_dung } = req.params;
-  if (ma_nguoi_dung === 'u1111111-1111-1111-1111-111111111111') {
-    return res.status(400).json({ error: 'Không thể xóa tài khoản Admin mặc định!' });
-  }
-  
-  db.run("DELETE FROM tin_nhan WHERE ma_hoi_thoai IN (SELECT ma_hoi_thoai FROM cuoc_hoi_thoai WHERE ma_nguoi_dung = ?)", [ma_nguoi_dung], (err) => {
-    db.run("DELETE FROM cuoc_hoi_thoai WHERE ma_nguoi_dung = ?", [ma_nguoi_dung], (err2) => {
-      db.run("DELETE FROM nguoi_dung WHERE ma_nguoi_dung = ?", [ma_nguoi_dung], (err3) => {
-        if (err3) return res.status(500).json({ error: err3.message });
-        res.json({ success: true, message: 'Đã xóa tài khoản và mọi dữ liệu liên quan thành công!' });
-      });
+        // Kiem tra OTP
+        if (!user.otp_code || user.otp_code !== otp_code) {
+            return res.status(400).json({ error: 'Mã OTP không đúng.' });
+        }
+
+        // Kiểm tra hết hạn
+        if (!user.otp_expiry || Date.now() > user.otp_expiry) {
+            return res.status(400).json({ error: 'Mã OTP đã hết hạn. Vui lòng yêu cầu lại.' });
+        }
+
+        // Cập nhật mật khẩu mới và xóa OTP
+        const hashedPassword = await bcrypt.hash(new_password, 10);
+        db.run(
+            "UPDATE nguoi_dung SET mat_khau_ma_hoa = ?, otp_code = NULL, otp_expiry = NULL WHERE ma_nguoi_dung = ?",
+            [hashedPassword, user.ma_nguoi_dung],
+            (err) => {
+                if (err) {
+                    return res.status(500).json({ error: 'Lỗi cập nhật mật khẩu.' });
+                }
+                res.json({ success: true, message: 'Đặt lại mật khẩu thành công! Vui lòng đăng nhập.' });
+            }
+        );
     });
-  });
 });
 
-router.post('/admin/keys', (req, res) => {
-  const { ten_nha_cung_cap, gia_tri_khoa } = req.body;
-  if (!ten_nha_cung_cap || !gia_tri_khoa) {
-    return res.status(400).json({ error: 'Thiếu thông tin Provider hoặc API Key' });
-  }
+// ADMIN: Lấy danh sách tất cả người dùng
+router.get('/users', [authMiddleware, adminMiddleware], (req, res) => {
+    const { search = '', page = 1, limit = 8 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
 
-  const keyId = 'k_' + ten_nha_cung_cap;
-  const maUser = "u1111111-1111-1111-1111-111111111111";
+    const searchCondition = `WHERE email LIKE ? OR ten_day_du LIKE ?`;
+    const searchParams = [`%${search}%`, `%${search}%`];
 
-  db.run(
-    `INSERT INTO khoa_api (ma_khoa, ma_nguoi_dung, ten_nha_cung_cap, gia_tri_khoa) 
-     VALUES (?, ?, ?, ?) 
-     ON CONFLICT(ma_khoa) DO UPDATE SET gia_tri_khoa = excluded.gia_tri_khoa`,
-    [keyId, maUser, ten_nha_cung_cap, gia_tri_khoa.trim()],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ success: true, message: 'Cấu hình API Key hệ thống thành công!' });
+    const countQuery = `SELECT COUNT(*) as total FROM nguoi_dung ${search ? searchCondition : ''}`;
+
+    db.get(countQuery, search ? searchParams : [], (err, row) => {
+        if (err) return res.status(500).json({ error: 'Lỗi truy vấn CSDL (count).' });
+
+        const totalUsers = row.total;
+        const totalPages = Math.ceil(totalUsers / limit);
+
+        const dataQuery = `
+            SELECT ma_nguoi_dung, email, ten_day_du, phan_quyen, ngay_tao 
+            FROM nguoi_dung 
+            ${search ? searchCondition : ''}
+            ORDER BY ngay_tao DESC 
+            LIMIT ? OFFSET ?
+        `;
+
+        db.all(dataQuery, search ? [...searchParams, limit, offset] : [limit, offset], (err, users) => {
+            if (err) return res.status(500).json({ error: 'Lỗi truy vấn CSDL (data).' });
+
+            res.json({ users, totalPages, currentPage: parseInt(page), totalUsers });
+        });
+    });
+});
+
+// ADMIN: Đổi phân quyền user
+router.put('/users/:id/role', [authMiddleware, adminMiddleware], (req, res) => {
+    const { id } = req.params;
+    const { phan_quyen } = req.body;
+    if (!['user', 'admin'].includes(phan_quyen)) {
+        return res.status(400).json({ error: 'Phân quyền không hợp lệ. Chỉ chấp nhận: user, admin' });
     }
-  );
+    if (req.user.id === id) {
+        return res.status(400).json({ error: 'Không thể thay đổi quyền của chính mình.' });
+    }
+    db.run('UPDATE nguoi_dung SET phan_quyen = ? WHERE ma_nguoi_dung = ?', [phan_quyen, id], function(err) {
+        if (err) return res.status(500).json({ error: 'Lỗi cập nhật phân quyền.' });
+        if (this.changes === 0) return res.status(404).json({ error: 'Không tìm thấy user.' });
+        res.json({ success: true, message: `Đã đổi quyền thành ${phan_quyen}` });
+    });
+});
+
+// ADMIN: Khoá / Mở khoá tài khoản
+router.put('/users/:id/status', [authMiddleware, adminMiddleware], (req, res) => {
+    const { id } = req.params;
+    const { trang_thai } = req.body;
+    if (!['active', 'banned'].includes(trang_thai)) {
+        return res.status(400).json({ error: 'Trạng thái không hợp lệ. Chỉ chấp nhận: active, banned' });
+    }
+    if (req.user.id === id) {
+        return res.status(400).json({ error: 'Không thể khoá tài khoản của chính mình.' });
+    }
+    db.run('UPDATE nguoi_dung SET trang_thai = ? WHERE ma_nguoi_dung = ?', [trang_thai, id], function(err) {
+        if (err) return res.status(500).json({ error: 'Lỗi cập nhật trạng thái.' });
+        if (this.changes === 0) return res.status(404).json({ error: 'Không tìm thấy user.' });
+        res.json({ success: true, trang_thai });
+    });
+});
+
+// ADMIN: Thống kê hệ thống
+router.get('/stats', [authMiddleware, adminMiddleware], (req, res) => {
+    const results = {};
+    db.get('SELECT COUNT(*) as total FROM nguoi_dung', [], (err, row) => {
+        results.tong_user = row?.total || 0;
+        db.get("SELECT COUNT(*) as total FROM nguoi_dung WHERE phan_quyen = 'admin'", [], (err2, row2) => {
+            results.tong_admin = row2?.total || 0;
+            db.get("SELECT COUNT(*) as total FROM nguoi_dung WHERE trang_thai = 'banned'", [], (err3, row3) => {
+                results.tong_bi_khoa = row3?.total || 0;
+                db.get('SELECT COUNT(*) as total FROM cuoc_hoi_thoai WHERE ngay_xoa IS NULL', [], (err4, row4) => {
+                    results.tong_hoi_thoai = row4?.total || 0;
+                    db.get('SELECT COUNT(*) as total FROM tin_nhan', [], (err5, row5) => {
+                        results.tong_tin_nhan = row5?.total || 0;
+                        db.get('SELECT COUNT(*) as total FROM cuoc_hoi_thoai WHERE ngay_xoa IS NOT NULL', [], (err6, row6) => {
+                            results.tong_xoa_mem = row6?.total || 0;
+                            res.json(results);
+                        });
+                    });
+                });
+            });
+        });
+    });
 });
 
 module.exports = router;

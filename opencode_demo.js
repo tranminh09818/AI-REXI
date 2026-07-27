@@ -1,1 +1,0 @@
-console.log("He thong OpenCode Agent hoat dong 100% thanh cong!");
