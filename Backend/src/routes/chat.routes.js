@@ -51,23 +51,39 @@ router.get('/admin/conversations/trash', [authMiddleware, adminMiddleware], (req
 });
 
 // USER: Lấy cuộc hội thoại của chính mình
-router.get('/conversations', authMiddleware, (req, res) => {
-  db.all("SELECT * FROM cuoc_hoi_thoai WHERE ma_nguoi_dung = ? AND ngay_xoa IS NULL ORDER BY ngay_cap_nhat DESC", [req.user.id], (err, rows) => {
+router.get('/conversations', (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return guestMiddleware(req, res, next);
+  }
+  return authMiddleware(req, res, next);
+}, (req, res) => {
+  const userId = req.user ? req.user.id : null;
+  if (!userId) {
+    return res.json([]);
+  }
+  db.all("SELECT * FROM cuoc_hoi_thoai WHERE ma_nguoi_dung = ? AND ngay_xoa IS NULL ORDER BY ngay_cap_nhat DESC", [userId], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });
 });
 
-router.post('/conversations', authMiddleware, (req, res) => {
+router.post('/conversations', (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return guestMiddleware(req, res, next);
+  }
+  return authMiddleware(req, res, next);
+}, (req, res) => {
   const { tieu_de, ten_mo_hinh_ai } = req.body;
   const maHoiThoai = crypto.randomUUID();
+  const userId = req.user ? req.user.id : 'guest-default';
 
   const sql = `
     INSERT INTO cuoc_hoi_thoai (ma_hoi_thoai, ma_nguoi_dung, ma_thu_muc, tieu_de, ten_mo_hinh_ai, trang_thai)
     VALUES (?, ?, ?, ?, ?, 'dang_mo')
   `;
-  // Tạm thời để ma_thu_muc là null, cần logic để user chọn workspace
-  db.run(sql, [maHoiThoai, req.user.id, null, tieu_de || 'Trò chuyện mới', ten_mo_hinh_ai || 'Gemini 3.5 Flash'], function(err) {
+  db.run(sql, [maHoiThoai, userId, null, tieu_de || 'Trò chuyện mới', ten_mo_hinh_ai || 'Gemini 3.5 Flash'], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ ma_hoi_thoai: maHoiThoai, tieu_de: tieu_de || 'Trò chuyện mới', ten_mo_hinh_ai: ten_mo_hinh_ai || 'Gemini 3.5 Flash' });
   });

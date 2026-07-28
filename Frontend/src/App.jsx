@@ -26,14 +26,7 @@ marked.setOptions({
 
 // Rexi Animated SVG Logo Component
 const RexiLogo = ({ className = "w-8 h-8" }) => (
-  <div className={`relative flex items-center justify-center ${className}`}>
-    <div className="absolute inset-0 rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-500 blur-sm opacity-75 animate-pulse"></div>
-    <div className="relative w-full h-full rounded-xl bg-[#13141a] border border-cyan-500/30 flex items-center justify-center shadow-lg shadow-cyan-500/10">
-      <svg className="w-3/5 h-3/5 text-cyan-400 drop-shadow-[0_0_8px_rgba(6,182,212,0.6)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-      </svg>
-    </div>
-  </div>
+  <img src="/rexi_cat_icon.png" alt="Rexi" className={`object-contain ${className}`} />
 );
 
 const POPULAR_MODELS = [
@@ -773,10 +766,12 @@ export default function App() {
           ) : (
             <button
               onClick={() => setAuthModalOpen(true)}
-              className="flex items-center gap-2 text-slate-400 hover:text-cyan-400 transition-colors"
+              className="flex items-center gap-2"
             >
-              <LogIn size={16} />
-              <span className="text-xs font-medium">Đăng nhập</span>
+              <div className="w-7 h-7 rounded-full border border-white/20 flex items-center justify-center">
+                <User size={14} className="text-white/70" />
+              </div>
+              <span className="text-xs font-medium text-white/70">Đăng nhập</span>
             </button>
           )}
 
@@ -1517,7 +1512,7 @@ export default function App() {
             </button>
 
             <div className="flex flex-col items-center pt-2 pb-2">
-              <img src="/cat-logo.png" alt="Logo" className="w-12 h-12 object-contain" />
+              <img src="/rexi_cat_icon.png" alt="Logo" className="w-12 h-12 object-contain" />
               <span className="text-xs text-white/50 font-semibold tracking-widest mt-1">AI Rexi</span>
             </div>
 
