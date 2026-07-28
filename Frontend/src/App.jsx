@@ -7,7 +7,7 @@ import {
   Globe, ChevronDown, Zap, MessageSquare, MoreHorizontal,
   ThumbsUp, ThumbsDown, RefreshCw, Edit3, Star, Play, ArrowUp, ArrowDown,
   Sparkles, Monitor, Sun, Moon, Tv, Eye, Code, Layout, Sliders,
-  ChevronRight, Activity, Terminal, Shield, Radio, HeartPulse, Wifi, FileSpreadsheet, Presentation, LogOut, Lock, ToggleLeft, ToggleRight, Server, GitBranch, GitCommit
+  ChevronRight, Activity, Terminal, Shield, Radio, HeartPulse, Wifi, FileSpreadsheet, Presentation, LogOut, LogIn, Lock, ToggleLeft, ToggleRight, Server, GitBranch, GitCommit
 } from 'lucide-react';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
@@ -54,7 +54,7 @@ const PROVIDERS = {
 };
 
 const AI_SPECIALTIES = [
-  { id: 'general', name: '🤖 Trợ Lý Toàn Năng' },
+  { id: 'general', name: '🧠 Trợ Lý Toàn Năng' },
   { id: 'business', name: '💼 Doanh Nghiệp & Hợp Đồng' },
   { id: 'marketing', name: '📢 Content Marketing' },
   { id: 'education', name: '📚 Phân Tích Chuyên Sâu' },
@@ -85,7 +85,6 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
   const [superToolsOpen, setSuperToolsOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState('login');
@@ -100,6 +99,7 @@ export default function App() {
   const [baseUrl, setBaseUrl] = useState(() => localStorage.getItem('rexi_base_url') || '');
   const [aiSpecialty, setAiSpecialty] = useState('general');
   const [executionMode, setExecutionMode] = useState('chat'); // 'chat' | 'agent'
+  const [chatModeOpen, setChatModeOpen] = useState(false);
   const [thinkingLevel, setThinkingLevel] = useState('standard'); // 'standard' | 'deep'
   const [currentTheme, setCurrentTheme] = useState(() => localStorage.getItem('rexi_theme') || 'tokyo-night');
 
@@ -124,6 +124,10 @@ export default function App() {
   const [selectedChannel, setSelectedChannel] = useState(null);
   const [iptvCategory, setIptvCategory] = useState('news');
   const [iptvSearch, setIptvSearch] = useState('');
+  const [iptvTab, setIptvTab] = useState('category'); // 'category' | 'country'
+  const [iptvCountry, setIptvCountry] = useState('VN');
+  const [iptvSubtitleOn, setIptvSubtitleOn] = useState(false);
+  const [iptvSubtitleText, setIptvSubtitleText] = useState('');
   const iptvVideoRef = useRef(null);
   const hlsRef = useRef(null);
 
@@ -142,10 +146,22 @@ export default function App() {
   const [memories, setMemories] = useState([]);
   const [newMemory, setNewMemory] = useState('');
 
+  // Auth Token
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('rexi_token') || '');
+
+  const authHeaders = () => {
+    const h = { 'Content-Type': 'application/json' };
+    if (authToken) h['Authorization'] = `Bearer ${authToken}`;
+    return h;
+  };
+
   // User Profile
   const [currentUser, setCurrentUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('rexi_user')) || { ma_nguoi_dung: 'u1111111-1111-1111-1111-111111111111', email: 'user@rexi.ai', ten_day_du: 'Rexi Admin User' }; }
-    catch { return { ma_nguoi_dung: 'u1111111-1111-1111-1111-111111111111', email: 'user@rexi.ai', ten_day_du: 'Rexi Admin User' }; }
+    try {
+      const saved = JSON.parse(localStorage.getItem('rexi_user'));
+      if (saved && saved.ma_nguoi_dung) return saved;
+      return null;
+    } catch { return null; }
   });
 
   const [authEmail, setAuthEmail] = useState('');
@@ -185,7 +201,7 @@ export default function App() {
 
   const fetchConversations = async () => {
     try {
-      const res = await fetch(`${API_BASE}/conversations`);
+      const res = await fetch(`${API_BASE}/chat/conversations`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setConversations(data);
@@ -198,7 +214,7 @@ export default function App() {
 
   const fetchMessages = async (convId) => {
     try {
-      const res = await fetch(`${API_BASE}/conversations/${convId}/messages`);
+      const res = await fetch(`${API_BASE}/chat/conversations/${convId}/messages`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setMessages(data);
@@ -218,7 +234,7 @@ export default function App() {
 
   const fetchDbSkills = async () => {
     try {
-      const res = await fetch(`${API_BASE}/skills`);
+      const res = await fetch(`${API_BASE}/services/skills`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setDbSkills(data);
@@ -228,7 +244,7 @@ export default function App() {
 
   const fetchGitStatus = async () => {
     try {
-      const res = await fetch(`${API_BASE}/git/status`);
+      const res = await fetch(`${API_BASE}/chat/git/status`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setGitStatus(data);
@@ -238,7 +254,7 @@ export default function App() {
 
   const fetchMemories = async () => {
     try {
-      const res = await fetch(`${API_BASE}/memory`);
+      const res = await fetch(`${API_BASE}/chat/memory`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setMemories(data);
@@ -246,13 +262,16 @@ export default function App() {
     } catch (e) { console.log(e); }
   };
 
-  const fetchIPTV = async (cat) => {
+  const fetchIPTV = async (cat, country) => {
     try {
-      const res = await fetch(`${API_BASE}/iptv/channels?category=${cat || iptvCategory}`);
+      let url = `${API_BASE}/services/iptv/channels?`;
+      if (country) url += `country=${country}`;
+      else if (cat) url += `category=${cat}`;
+      const res = await fetch(url, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         if (data.channels) {
-          setIptvChannels(data.channels.slice(0, 120));
+          setIptvChannels(data.channels);
           if (data.channels.length > 0) setSelectedChannel(data.channels[0]);
         }
       }
@@ -288,18 +307,18 @@ export default function App() {
     setDesktopLoading(true);
     try {
       // Backend chụp màn hình qua schtasks interactive
-      const res = await fetch(`${API_BASE}/desktop/screenshot?t=${Date.now()}`);
+      const res = await fetch(`${API_BASE}/services/desktop/screenshot?t=${Date.now()}`, { headers: authHeaders() });
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         setDesktopScreenshot(url);
       } else {
         // Thử trigger qua schtasks
-        await fetch(`${API_BASE}/exec`, {
-          method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ command: `powershell -Command "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width,[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $g=[System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen(0,0,0,0,$b.Size); $b.Save('d:\\AI REXI\\Backend\\temp_screen.jpg',[System.Drawing.Imaging.ImageFormat]::Jpeg); $g.Dispose(); $b.Dispose()"` })
+        await fetch(`${API_BASE}/chat/exec`, {
+          method: 'POST', headers: authHeaders(),
+          body: JSON.stringify({ command: `powershell -Command "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width,[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $g=[System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen(0,0,0,0,$b.Size); $b.Save('d:\\AI REXI\\Backend\\temp_screen.jpg',[System.Drawing.Imaging.ImageFormat]::Jpeg); $g.Dispose(); $b.Dispose()"`, 'X-Exec-Confirm': 'yes' })
         });
-        setDesktopScreenshot(`${API_BASE}/desktop/screenshot?t=${Date.now()}`);
+        setDesktopScreenshot(`${API_BASE}/services/desktop/screenshot?t=${Date.now()}`);
       }
     } catch (e) { console.log(e); }
     finally { setDesktopLoading(false); }
@@ -307,7 +326,7 @@ export default function App() {
 
   const fetchGitDiff = async () => {
     try {
-      const res = await fetch(`${API_BASE}/git/diff`);
+      const res = await fetch(`${API_BASE}/chat/git/diff`, { headers: authHeaders() });
       if (res.ok) { const d = await res.json(); setGitDiff(d.diff || ''); }
     } catch(e) {}
   };
@@ -319,9 +338,9 @@ export default function App() {
 
   const handleNewConversation = async () => {
     try {
-      const res = await fetch(`${API_BASE}/conversations`, {
+      const res = await fetch(`${API_BASE}/chat/conversations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ tieu_de: 'Trò chuyện mới', ten_mo_hinh_ai: modelName })
       });
       if (res.ok) {
@@ -336,7 +355,7 @@ export default function App() {
   const handleDeleteConversation = async (id, e) => {
     e.stopPropagation();
     try {
-      await fetch(`${API_BASE}/conversations/${id}`, { method: 'DELETE' });
+      await fetch(`${API_BASE}/chat/conversations/${id}`, { method: 'DELETE', headers: authHeaders() });
       setConversations(prev => prev.filter(c => c.ma_hoi_thoai !== id));
       if (activeConvId === id) setActiveConvId(null);
     } catch (e) { console.error(e); }
@@ -370,9 +389,9 @@ export default function App() {
 
     let convId = activeConvId;
     if (!convId) {
-      const res = await fetch(`${API_BASE}/conversations`, {
+      const res = await fetch(`${API_BASE}/chat/conversations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ tieu_de: text.substring(0, 30), ten_mo_hinh_ai: modelName })
       });
       const data = await res.json();
@@ -388,9 +407,9 @@ export default function App() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE}/conversations/${convId}/messages`, {
+      const res = await fetch(`${API_BASE}/chat/conversations/${convId}/messages`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({
           vai_tro: 'user',
           noi_dung: text,
@@ -410,6 +429,9 @@ export default function App() {
         }
         setMessages(prev => [...prev.filter(m => m.ma_tin_nhan !== tempUserMsg.ma_tin_nhan), tempUserMsg, aiMsg]);
         fetchConversations();
+      } else if (res.status === 429) {
+        setRateLimitToast('Quá nhiều yêu cầu trong thời gian ngắn (Rate Limit Exceeded). Vui lòng đợi 1 phút.');
+        setTimeout(() => setRateLimitToast(''), 5000);
       }
     } catch (e) {
       setMessages(prev => [...prev, {
@@ -503,10 +525,10 @@ export default function App() {
   const handleExecCommand = async () => {
     if (!execCommand.trim()) return;
     try {
-      const res = await fetch(`${API_BASE}/exec`, {
+      const res = await fetch(`${API_BASE}/chat/exec`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: execCommand })
+        headers: authHeaders(),
+        body: JSON.stringify({ command: execCommand, 'X-Exec-Confirm': 'yes' })
       });
       const data = await res.json();
       setExecOutput(data.stdout || data.stderr || data.error || 'Thực thi thành công.');
@@ -516,9 +538,9 @@ export default function App() {
   const handleAddMemory = async () => {
     if (!newMemory.trim()) return;
     try {
-      await fetch(`${API_BASE}/memory`, {
+      await fetch(`${API_BASE}/chat/memory`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ loai: 'thong_tin_user', noi_dung: newMemory })
       });
       setNewMemory('');
@@ -526,11 +548,41 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
-  const handleAuthSubmit = () => {
-    const u = { ma_nguoi_dung: 'u1111111-1111-1111-1111-111111111111', email: authEmail || 'user@rexi.ai', ten_day_du: authFullName || authEmail.split('@')[0] || 'Rexi Admin User' };
-    setCurrentUser(u);
-    localStorage.setItem('rexi_user', JSON.stringify(u));
-    setAuthModalOpen(false);
+  const handleAuthSubmit = async () => {
+    try {
+      const endpoint = authMode === 'login' ? `${API_BASE}/auth/login` : `${API_BASE}/auth/register`;
+      const body = authMode === 'login'
+        ? { email: authEmail, password: authPassword }
+        : { email: authEmail, password: authPassword, ten_day_du: authFullName };
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+
+      if (data.success && data.token) {
+        setAuthToken(data.token);
+        localStorage.setItem('rexi_token', data.token);
+        if (data.user) {
+          setCurrentUser(data.user);
+          localStorage.setItem('rexi_user', JSON.stringify(data.user));
+        }
+        setAuthModalOpen(false);
+      } else if (authMode === 'register' && data.success) {
+        setAuthMode('login');
+        alert('Đăng ký thành công! Vui lòng đăng nhập.');
+      } else {
+        alert(data.error || 'Đăng nhập thất bại');
+      }
+    } catch (e) {
+      // Fallback: offline mode
+      const u = { ma_nguoi_dung: 'u1111111-1111-1111-1111-111111111111', email: authEmail || 'user@rexi.ai', ten_day_du: authFullName || authEmail.split('@')[0] || 'Rexi Admin User' };
+      setCurrentUser(u);
+      localStorage.setItem('rexi_user', JSON.stringify(u));
+      setAuthModalOpen(false);
+    }
   };
 
   const renderTree = (nodes) => nodes.map(node => (
@@ -705,27 +757,37 @@ export default function App() {
 
         {/* Bottom User Profile Bar */}
         <div className="p-3 border-t border-white/5 flex items-center justify-between bg-[#131417]">
-          <div
-            onClick={() => setAuthModalOpen(true)}
-            className="flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity"
-          >
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white shadow-md">
-              {currentUser.ten_day_du ? currentUser.ten_day_du[0].toUpperCase() : 'U'}
+          {currentUser ? (
+            <div
+              onClick={() => setAuthModalOpen(true)}
+              className="flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity"
+            >
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white shadow-md">
+                {currentUser.ten_day_du ? currentUser.ten_day_du[0].toUpperCase() : 'U'}
+              </div>
+              <div className="truncate max-w-[110px]">
+                <p className="text-xs font-semibold text-white truncate">{currentUser.ten_day_du}</p>
+                <p className="text-[10px] text-emerald-400 font-medium">● Connected</p>
+              </div>
             </div>
-            <div className="truncate max-w-[110px]">
-              <p className="text-xs font-semibold text-white truncate">{currentUser.ten_day_du}</p>
-              <p className="text-[10px] text-emerald-400 font-medium">● Connected</p>
-            </div>
-          </div>
+          ) : (
+            <button
+              onClick={() => setAuthModalOpen(true)}
+              className="flex items-center gap-2 text-slate-400 hover:text-cyan-400 transition-colors"
+            >
+              <LogIn size={16} />
+              <span className="text-xs font-medium">Đăng nhập</span>
+            </button>
+          )}
 
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => setAdminOpen(true)}
+            <a
+              href="/admin"
               className="p-1.5 rounded-lg hover:bg-white/10 text-amber-400 transition-colors"
-              title="Admin System Panel"
+              title="Admin Control Panel"
             >
               <Shield size={16} />
-            </button>
+            </a>
             <button
               onClick={() => setSettingsOpen(true)}
               className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
@@ -825,53 +887,6 @@ export default function App() {
           {activeTab === 'chat' && (
             <div className="flex flex-col h-full max-w-4xl mx-auto px-4 py-3">
 
-              {/* ── MODE SWITCHER BAR (Chat AI vs Agent Mode) ── */}
-              <div className="flex items-center gap-2 mb-3">
-                <div className="flex items-center bg-[#181920] border border-white/8 rounded-2xl p-1 gap-1">
-                  <button
-                    onClick={() => setExecutionMode('chat')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                      executionMode !== 'agent'
-                        ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-lg shadow-cyan-500/20'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <MessageSquare size={15} />
-                    <span>💬 Chat AI</span>
-                  </button>
-                  <button
-                    onClick={() => setExecutionMode('agent')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                      executionMode === 'agent'
-                        ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white shadow-lg shadow-purple-500/25 animate-pulse-slow'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <Sparkles size={15} />
-                    <span>🤖 Agent Mode</span>
-                  </button>
-                </div>
-                {executionMode === 'agent' && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs font-medium">
-                    <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse inline-block"></span>
-                    Agent đang hoạt động — tự động thực thi code &amp; lệnh
-                  </div>
-                )}
-
-                {/* Quick Action Chips */}
-                <div className="flex items-center gap-2 overflow-x-auto scrollbar-none ml-auto">
-                  {QUICK_CHIPS.map(chip => (
-                    <button
-                      key={chip.id}
-                      onClick={() => setInputText(chip.prompt)}
-                      className="shrink-0 px-3 py-1.5 rounded-full bg-[#181920] border border-white/10 hover:border-cyan-500/40 text-slate-300 hover:text-cyan-300 text-xs font-medium transition-all"
-                    >
-                      {chip.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* Chat Messages Stream */}
               <div ref={chatScrollRef} className="flex-1 overflow-y-auto space-y-4 pr-1 mt-2">
                 {messages.length === 0 ? (
@@ -879,9 +894,22 @@ export default function App() {
                     <RexiLogo className="w-16 h-16" />
                     <div>
                       <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">
-                        Chào {currentUser.ten_day_du}! Tôi là AI Rexi Master.
+                        Chào {currentUser?.ten_day_du || 'bạn'}! Tôi là AI Rexi Master.
                       </h2>
                       <p className="text-xs text-slate-400 mt-2">Hệ thống trợ lý AI tích hợp 35+ Skills Agent, Giọng đọc Tiếng Việt, Office CLI, WiFi Health & IPTV Hub</p>
+                    </div>
+
+                    {/* Quick Chips */}
+                    <div className="flex items-center gap-2 flex-wrap justify-center">
+                      {QUICK_CHIPS.map(chip => (
+                        <button
+                          key={chip.id}
+                          onClick={() => setInputText(chip.prompt)}
+                          className="px-4 py-2 rounded-full bg-[#181920] border border-white/10 hover:border-cyan-500/40 text-slate-300 hover:text-cyan-300 text-xs font-medium transition-all"
+                        >
+                          {chip.name}
+                        </button>
+                      ))}
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 w-full max-w-lg">
@@ -989,6 +1017,45 @@ export default function App() {
                 />
 
                 <div className="flex items-center bg-[#181920] border border-white/10 focus-within:border-cyan-500/50 rounded-2xl px-4 py-2.5 shadow-xl transition-all">
+                  {/* Chat Mode Custom Dropdown */}
+                  <div className="relative mr-2">
+                    <button
+                      onClick={() => setChatModeOpen(!chatModeOpen)}
+                      className="flex items-center gap-1.5 bg-[#131417] text-[11px] font-medium text-cyan-300 border border-cyan-500/30 rounded-lg px-2 py-1.5 cursor-pointer hover:bg-[#1a1b20] transition-colors w-[110px] justify-between whitespace-nowrap overflow-hidden"
+                    >
+                      {executionMode === 'agent' ? '⚡ Agent Mode' : '💬 Chat AI'}
+                      <ChevronDown size={12} className={`transition-transform ${chatModeOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {chatModeOpen && (
+                      <div className="absolute bottom-full left-0 mb-2 bg-[#1a1b24] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 min-w-[200px]">
+                        <button
+                          onClick={() => { setExecutionMode('chat'); setChatModeOpen(false); }}
+                          className={`w-full flex items-start gap-3 px-3 py-2.5 hover:bg-white/5 transition-colors text-left ${
+                            executionMode !== 'agent' ? 'bg-cyan-500/10' : ''
+                          }`}
+                        >
+                          <MessageSquare size={16} className={executionMode !== 'agent' ? 'text-cyan-400 mt-0.5' : 'text-slate-400 mt-0.5'} />
+                          <div>
+                            <p className={`text-xs font-bold ${executionMode !== 'agent' ? 'text-cyan-300' : 'text-slate-200'}`}>Chat AI</p>
+                            <p className="text-[10px] text-slate-500 mt-0.5">Trò chuyện AI thông thường</p>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => { setExecutionMode('agent'); setChatModeOpen(false); }}
+                          className={`w-full flex items-start gap-3 px-3 py-2.5 hover:bg-white/5 transition-colors text-left ${
+                            executionMode === 'agent' ? 'bg-purple-500/10' : ''
+                          }`}
+                        >
+                          <Zap size={16} className={executionMode === 'agent' ? 'text-purple-400 mt-0.5' : 'text-slate-400 mt-0.5'} />
+                          <div>
+                            <p className={`text-xs font-bold ${executionMode === 'agent' ? 'text-purple-300' : 'text-slate-200'}`}>Agent Mode</p>
+                            <p className="text-[10px] text-slate-500 mt-0.5">Tự động thực thi code & tác vụ</p>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     className="p-2 text-slate-400 hover:text-cyan-400 transition-colors"
@@ -1116,20 +1183,54 @@ export default function App() {
               <div className="w-72 h-full border-r border-white/5 bg-[#181920] flex flex-col shrink-0">
                 <div className="p-3 border-b border-white/5 space-y-2">
                   <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <Tv size={16} className="text-rose-400" /> Kênh IPTV Live ({iptvChannels.length})
+                    <Tv size={16} className="text-rose-400" /> Kênh IPTV ({iptvChannels.length})
                   </h3>
-                  <select
-                    value={iptvCategory}
-                    onChange={e => { setIptvCategory(e.target.value); fetchIPTV(e.target.value); }}
-                    className="w-full bg-[#131417] text-xs text-slate-300 border border-white/10 rounded-xl p-2 outline-none"
-                  >
-                    <option value="news">📰 Tin Tức 24/7</option>
-                    <option value="animation">🦄 Hoạt Hình / Anime</option>
-                    <option value="movies">🍿 Phim Điện Ảnh</option>
-                    <option value="sports">⚽ Thể Thao Live</option>
-                    <option value="entertainment">🎭 Giải Trí</option>
-                    <option value="music">🎵 Âm Nhạc</option>
-                  </select>
+                  {/* Tab Thể Loại / Quốc Gia */}
+                  <div className="flex gap-1 bg-[#131417] rounded-xl p-1">
+                    <button
+                      onClick={() => { setIptvTab('category'); fetchIPTV(iptvCategory); }}
+                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all ${iptvTab === 'category' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'text-slate-400 hover:text-white'}`}
+                    >
+                      <Tv size={11} className="inline mr-1" />Thể Loại
+                    </button>
+                    <button
+                      onClick={() => { setIptvTab('country'); fetchIPTV(null, iptvCountry); }}
+                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all ${iptvTab === 'country' ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'text-slate-400 hover:text-white'}`}
+                    >
+                      <Globe size={11} className="inline mr-1" />Quốc Gia ({iptvChannels.length})
+                    </button>
+                  </div>
+                  {iptvTab === 'category' ? (
+                    <select
+                      value={iptvCategory}
+                      onChange={e => { setIptvCategory(e.target.value); fetchIPTV(e.target.value); }}
+                      className="w-full bg-[#131417] text-xs text-slate-300 border border-white/10 rounded-xl p-2 outline-none"
+                    >
+                      <option value="news">📰 Tin Tức 24/7</option>
+                      <option value="animation">🦄 Hoạt Hình / Anime</option>
+                      <option value="movies">🍿 Phim Điện Ảnh</option>
+                      <option value="sports">⚽ Thể Thao Live</option>
+                      <option value="entertainment">🎭 Giải Trí</option>
+                      <option value="music">🎵 Âm Nhạc</option>
+                    </select>
+                  ) : (
+                    <select
+                      value={iptvCountry}
+                      onChange={e => { setIptvCountry(e.target.value); fetchIPTV(null, e.target.value); }}
+                      className="w-full bg-[#131417] text-xs text-slate-300 border border-white/10 rounded-xl p-2 outline-none"
+                    >
+                      <option value="VN">🇻🇳 Việt Nam</option>
+                      <option value="US">🇺🇸 United States</option>
+                      <option value="GB">🇬🇧 United Kingdom</option>
+                      <option value="KR">🇰🇷 South Korea</option>
+                      <option value="JP">🇯🇵 Japan</option>
+                      <option value="CN">🇨🇳 China</option>
+                      <option value="TH">🇹🇭 Thailand</option>
+                      <option value="FR">🇫🇷 France</option>
+                      <option value="DE">🇩🇪 Germany</option>
+                      <option value="IN">🇮🇳 India</option>
+                    </select>
+                  )}
                   <input
                     type="text"
                     value={iptvSearch}
@@ -1167,6 +1268,14 @@ export default function App() {
                     <Radio size={13} className="text-rose-400 animate-pulse" />
                     <span className="text-xs font-medium text-white truncate">{selectedChannel.name}</span>
                     <span className="ml-auto text-[10px] text-slate-500 truncate max-w-[200px]">{selectedChannel.url}</span>
+                    {/* Nút Bật Phụ Đề AI */}
+                    <button
+                      onClick={() => setIptvSubtitleOn(!iptvSubtitleOn)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1 transition-all ${iptvSubtitleOn ? 'bg-rose-500 text-white' : 'bg-red-600 hover:bg-red-500 text-white'}`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>
+                      Bật Phụ Đề AI
+                    </button>
                   </div>
                 )}
                 <div className="flex-1 relative">
@@ -1226,8 +1335,8 @@ export default function App() {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const xPct = ((e.clientX - rect.left) / rect.width).toFixed(4);
                   const yPct = ((e.clientY - rect.top) / rect.height).toFixed(4);
-                  await fetch(`${API_BASE}/desktop/click`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  await fetch(`${API_BASE}/services/desktop/click`, {
+                    method: 'POST', headers: authHeaders(),
                     body: JSON.stringify({ x_percent: parseFloat(xPct), y_percent: parseFloat(yPct) })
                   });
                   setTimeout(fetchDesktopScreenshot, 600);
@@ -1379,7 +1488,7 @@ export default function App() {
                       <span className="flex-1 text-slate-300">{m.noi_dung}</span>
                       <button
                         onClick={async () => {
-                          await fetch(`${API_BASE}/memory/${m.ma_bo_nho}`, { method: 'DELETE' });
+                          await fetch(`${API_BASE}/chat/memory/${m.ma_bo_nho}`, { method: 'DELETE', headers: authHeaders() });
                           fetchMemories();
                         }}
                         className="opacity-0 group-hover:opacity-100 text-rose-400 hover:text-rose-300 shrink-0"
@@ -1399,47 +1508,36 @@ export default function App() {
         </div>
       )}
 
-      {/* ═══════════════════ ADMIN CONTROL PANEL MODAL ═══════════════════ */}
-      {adminOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#181920] border border-amber-500/30 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/5 pb-3">
-              <h3 className="text-sm font-bold text-amber-400 flex items-center gap-2">
-                <Shield size={18} /> Admin System Control Panel
-              </h3>
-              <button onClick={() => setAdminOpen(false)} className="text-slate-400 hover:text-white">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div className="p-3 bg-[#131417] rounded-xl border border-white/5 space-y-1">
-                <p className="text-slate-300 font-bold">● Server Status: Online</p>
-                <p className="text-[11px] text-slate-400">Node.js Express API: http://localhost:5000</p>
-                <p className="text-[11px] text-slate-400">Database SQLite: tro_ly_ai.db (Connected)</p>
-              </div>
-
-              <div className="p-3 bg-[#131417] rounded-xl border border-white/5 space-y-1">
-                <p className="text-slate-300 font-bold">● Active User Session</p>
-                <p className="text-[11px] text-slate-400">Tài khoản: {currentUser.ten_day_du} ({currentUser.email})</p>
-              </div>
-            </div>
-
-            <button onClick={() => setAdminOpen(false)} className="w-full py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-medium text-xs">Đóng Admin Panel</button>
-          </div>
-        </div>
-      )}
-
       {/* ═══════════════════ USER AUTH MODAL ═══════════════════ */}
       {authModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#181920] border border-white/10 rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/5 pb-3">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <User className="text-cyan-400" size={18} />
-                {authMode === 'login' ? 'Đăng Nhập Tài Khoản' : 'Đăng Ký Tài Khoản Mới'}
-              </h3>
-              <button onClick={() => setAuthModalOpen(false)} className="text-slate-400 hover:text-white"><X size={18} /></button>
+          <div className="bg-[#181920] border border-white/10 rounded-2xl w-full max-w-sm p-6 shadow-2xl relative">
+            <button onClick={() => setAuthModalOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+              <X size={18} />
+            </button>
+
+            <div className="flex flex-col items-center pt-2 pb-2">
+              <img src="/cat-logo.png" alt="Logo" className="w-12 h-12 object-contain" />
+              <span className="text-xs text-white/50 font-semibold tracking-widest mt-1">AI Rexi</span>
+            </div>
+
+            <div className="flex bg-[#1e1f28] rounded-xl p-1 mb-5">
+              <button
+                onClick={() => setAuthMode('login')}
+                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                  authMode === 'login' ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Đăng Nhập
+              </button>
+              <button
+                onClick={() => setAuthMode('register')}
+                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                  authMode === 'register' ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Đăng Ký
+              </button>
             </div>
 
             <div className="space-y-3 text-xs">
@@ -1459,8 +1557,30 @@ export default function App() {
               </div>
             </div>
 
-            <button onClick={handleAuthSubmit} className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-white font-medium text-xs shadow-md transition-all">
+            <div className="flex justify-end mt-1">
+              <button className="text-[10px] text-slate-500 hover:text-cyan-400 transition-colors">
+                Quên Mật Khẩu?
+              </button>
+            </div>
+
+            <button onClick={handleAuthSubmit} className="w-full py-3 mt-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs shadow-lg shadow-cyan-500/25 transition-all">
               {authMode === 'login' ? 'Đăng Nhập' : 'Đăng Ký'}
+            </button>
+
+            <div className="relative flex items-center my-4">
+              <div className="flex-1 h-px bg-white/5"></div>
+              <span className="px-3 text-[10px] text-slate-500 font-medium">hoặc</span>
+              <div className="flex-1 h-px bg-white/5"></div>
+            </div>
+
+            <button className="w-full py-2.5 rounded-xl bg-[#242530] hover:bg-[#2a2b38] text-white text-xs font-medium flex items-center justify-center gap-2 border border-white/5 transition-all">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+              </svg>
+              Đăng nhập với Google
             </button>
           </div>
         </div>
@@ -1513,6 +1633,30 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ═══════════════════ FLOATING RIGHT SIDEBAR ═══════════════════ */}
+      <div className="fixed right-3 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-2 bg-[#1e1f20]/90 backdrop-blur-md border border-white/10 rounded-2xl p-1.5 shadow-2xl">
+        {[
+          { tab: 'chat', icon: <MessageSquare size={18} />, label: 'Chat' },
+          { tab: 'code', icon: <Code size={18} />, label: 'Code' },
+          { tab: 'files', icon: <Folder size={18} />, label: 'Files' },
+          { tab: 'iptv', icon: <Tv size={18} />, label: 'TV' },
+          { tab: 'desktop', icon: <Monitor size={18} />, label: 'Remote' },
+        ].map(item => (
+          <button
+            key={item.tab}
+            onClick={() => setActiveTab(item.tab)}
+            title={item.label}
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
+              activeTab === item.tab
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-lg shadow-cyan-500/10'
+                : 'text-slate-400 hover:text-white hover:bg-white/10'
+            }`}
+          >
+            {item.icon}
+          </button>
+        ))}
+      </div>
 
     </div>
   );

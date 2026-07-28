@@ -30,11 +30,9 @@ app.use(session({
   cookie: { secure: process.env.NODE_ENV === 'production' } // 'secure: true' nếu dùng HTTPS
 }));
 
-const { rateLimitMiddleware } = require('./src/middleware/rateLimit.middleware');
 const { promptNormalizerMiddleware } = require('./src/middleware/promptNormalizer.middleware');
 
-// Apply Global Rate Limiting & Teencode Normalization
-app.use(rateLimitMiddleware);
+// Apply Teencode Normalization
 app.use(promptNormalizerMiddleware);
 
 // Liên kết các API Routes

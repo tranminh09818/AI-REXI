@@ -395,7 +395,7 @@ router.post('/conversations/:id/messages', (req, res, next) => {
   return authMiddleware(req, res, next);
 }, async (req, res) => {
   const { id } = req.params;
-  const { vai_tro, noi_dung, provider, client_api_key, model_name, base_url, mode, execution_mode } = req.body;
+  const { vai_tro, noi_dung, provider, client_api_key, model_name, base_url, mode, execution_mode, thinking_level } = req.body;
 
   // Logic xử lý tin nhắn giữ nguyên...
   const maTinNhanUser = crypto.randomUUID();

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const { authMiddleware, adminMiddleware } = require('../middleware/auth.middleware');
 
 const rootDir = path.resolve(__dirname, '..', '..', '..');
 
@@ -20,7 +21,7 @@ function resolveWorkspacePath(relativePath) {
   return fullPath;
 }
 
-router.get('/files', (req, res) => {
+router.get('/files', authMiddleware, (req, res) => {
   function scanDir(dirPath, relativeDir = '') {
     const items = fs.readdirSync(dirPath, { withFileTypes: true });
     const result = [];
@@ -66,7 +67,7 @@ function safePath(rootDir, relPath) {
   return fullPath;
 }
 
-router.get('/file-content', (req, res) => {
+router.get('/file-content', authMiddleware, (req, res) => {
   const relPath = req.query.path;
   if (!relPath) return res.status(400).json({ error: 'Missing file path' });
 
@@ -82,7 +83,7 @@ router.get('/file-content', (req, res) => {
   }
 });
 
-router.post('/file-content', (req, res) => {
+router.post('/file-content', authMiddleware, (req, res) => {
   const { path: relPath, content } = req.body;
   if (!relPath) return res.status(400).json({ error: 'Missing file path' });
 
