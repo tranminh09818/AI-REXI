@@ -873,6 +873,29 @@ noi_dung: isAgentLimit
             />
           )}
 
+          {/* TAB 2 & 3: CODE EDITOR & WORKSPACE FILES */}
+          {(activeTab === 'code' || activeTab === 'files') && (
+            <CodeEditorTab
+              selectedFile={selectedFile} fileContent={fileContent}
+              setFileContent={setFileContent} savingFile={savingFile}
+              handleSaveFile={handleSaveFile} liveHtml={liveHtml}
+              setLiveHtml={setLiveHtml}
+            />
+          )}
+
+          {/* TAB 4: IPTV LIVE TV */}
+          {activeTab === 'iptv' && (
+            <IPTVTab
+              iptvTab={iptvMode} setIptvTab={setIptvMode}
+              iptvCategory={iptvCategory} setIptvCategory={setIptvCategory}
+              iptvCountry={iptvCountry} setIptvCountry={setIptvCountry}
+              iptvSearch={iptvSearch} setIptvSearch={setIptvSearch}
+              iptvChannels={iptvChannels} selectedChannel={selectedChannel}
+              setSelectedChannel={setSelectedChannel} fetchIPTV={fetchIPTV}
+              iptvVideoRef={iptvVideoRef}
+            />
+          )}
+
           {/* TAB 5: REMOTE DESKTOP CONTROL */}
           {activeTab === 'desktop' && (
             <div className="flex flex-col h-full w-full p-4 bg-[#0d0e11] space-y-3">
