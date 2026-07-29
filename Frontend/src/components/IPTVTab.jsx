@@ -208,81 +208,47 @@ export default function IPTVTab({
             placeholder="Tìm kênh..."
             className="w-full mt-2 px-2 py-1.5 bg-[#1a1b24] border border-white/5 rounded-lg text-[10px] text-white placeholder-slate-600 outline-none focus:border-rose-500/30"
           />
-          {/* Filter chips */}
+          {/* Compact filter dropdown */}
           {iptvTab === 'category' && (
-            <div className="mt-2.5 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] text-slate-500 uppercase tracking-wider font-semibold">Thể loại</span>
-                {iptvCategory && (
-                  <button onClick={() => { setIptvCategory?.(''); fetchIPTV?.(''); }}
-                    className="text-[9px] text-rose-400 hover:text-rose-300 transition-colors">
-                    ✕ Xoá
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  onClick={() => { setIptvCategory?.(''); fetchIPTV?.(''); }}
-                  className={`px-2.5 py-1.5 rounded-full text-[9px] font-medium transition-all duration-200 ${
-                    !iptvCategory
-                      ? 'bg-rose-500/25 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.15)]'
-                      : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white/80'
-                  }`}
-                >
-                  🌟 Tất cả
-                </button>
+            <div className="mt-2 flex items-center gap-1.5">
+              <select
+                value={iptvCategory || ''}
+                onChange={e => { setIptvCategory?.(e.target.value); fetchIPTV?.(e.target.value); }}
+                className="flex-1 px-2 py-1.5 bg-[#1a1b24] border border-white/5 rounded-lg text-[10px] text-white outline-none focus:border-rose-500/30 cursor-pointer appearance-none"
+              >
+                <option value="">🌟 Tất cả thể loại</option>
                 {IPTV_CATEGORIES.map(cat => (
-                  <button
-                    key={cat.id}
-                    onClick={() => { setIptvCategory?.(cat.id); fetchIPTV?.(cat.id); }}
-                    className={`px-2.5 py-1.5 rounded-full text-[9px] font-medium transition-all duration-200 ${
-                      iptvCategory === cat.id
-                        ? 'bg-rose-500/25 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.15)]'
-                        : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white/80'
-                    }`}
-                  >
-                    {cat.name}
-                  </button>
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
                 ))}
-              </div>
+              </select>
+              {iptvCategory && (
+                <button onClick={() => { setIptvCategory?.(''); fetchIPTV?.(''); }}
+                  className="px-1.5 py-1 text-[9px] text-slate-500 hover:text-rose-400 transition-colors shrink-0"
+                  title="Xoá bộ lọc">
+                  ✕
+                </button>
+              )}
             </div>
           )}
           {iptvTab === 'country' && (
-            <div className="mt-2.5 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] text-slate-500 uppercase tracking-wider font-semibold">Quốc gia</span>
-                {iptvCountry && (
-                  <button onClick={() => { setIptvCountry?.(''); fetchIPTV?.(''); }}
-                    className="text-[9px] text-rose-400 hover:text-rose-300 transition-colors">
-                    ✕ Xoá
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  onClick={() => { setIptvCountry?.(''); fetchIPTV?.(''); }}
-                  className={`px-2.5 py-1.5 rounded-full text-[9px] font-medium transition-all duration-200 ${
-                    !iptvCountry
-                      ? 'bg-rose-500/25 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.15)]'
-                      : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white/80'
-                  }`}
-                >
-                  🌟 Tất cả
-                </button>
+            <div className="mt-2 flex items-center gap-1.5">
+              <select
+                value={iptvCountry || ''}
+                onChange={e => { setIptvCountry?.(e.target.value); fetchIPTV?.(e.target.value); }}
+                className="flex-1 px-2 py-1.5 bg-[#1a1b24] border border-white/5 rounded-lg text-[10px] text-white outline-none focus:border-rose-500/30 cursor-pointer appearance-none"
+              >
+                <option value="">🌍 Tất cả quốc gia</option>
                 {IPTV_COUNTRIES.map(co => (
-                  <button
-                    key={co.id}
-                    onClick={() => { setIptvCountry?.(co.id); fetchIPTV?.(co.id); }}
-                    className={`px-2.5 py-1.5 rounded-full text-[9px] font-medium transition-all duration-200 ${
-                      iptvCountry === co.id
-                        ? 'bg-rose-500/25 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.15)]'
-                        : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white/80'
-                    }`}
-                  >
-                    {co.name}
-                  </button>
+                  <option key={co.id} value={co.id}>{co.name}</option>
                 ))}
-              </div>
+              </select>
+              {iptvCountry && (
+                <button onClick={() => { setIptvCountry?.(''); fetchIPTV?.(''); }}
+                  className="px-1.5 py-1 text-[9px] text-slate-500 hover:text-rose-400 transition-colors shrink-0"
+                  title="Xoá bộ lọc">
+                  ✕
+                </button>
+              )}
             </div>
           )}
         </div>
