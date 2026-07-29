@@ -775,26 +775,26 @@ noi_dung: isAgentLimit
         )}
 
         {/* Top Header Bar */}
-        <header className="h-14 px-4 border-b border-white/5 flex items-center justify-between bg-[var(--bg-sidebar)] backdrop-blur-md">
-          <div className="flex items-center gap-3">
+        <header className="min-h-14 py-2 px-3 border-b border-white/5 flex flex-wrap items-center justify-between gap-2 bg-[var(--bg-sidebar)] backdrop-blur-md">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
             {!sidebarOpen && (
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="p-2 rounded-xl hover:bg-white/10 text-slate-300 transition-colors"
+                className="p-1.5 rounded-xl hover:bg-white/10 text-slate-300 transition-colors shrink-0"
               >
                 <Menu size={18} />
               </button>
             )}
 
             {/* Model & Specialty Selectors */}
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
               <select
                 value={modelName}
                 onChange={e => {
                   setModelName(e.target.value);
                   localStorage.setItem('rexi_model', e.target.value);
                 }}
-                className="bg-[#131417] text-xs font-medium text-cyan-300 border border-cyan-500/30 rounded-xl px-3 py-1.5 outline-none cursor-pointer hover:border-cyan-400 transition-all shrink-0 min-w-[170px]"
+                className="bg-[#131417] text-[11px] font-medium text-cyan-300 border border-cyan-500/30 rounded-xl px-2.5 py-1.5 outline-none cursor-pointer hover:border-cyan-400 transition-all shrink-0 max-w-[150px] sm:max-w-none"
               >
                 {POPULAR_MODELS.map(m => (
                   <option key={m.id} value={m.id} className="bg-[#1e1f20] text-slate-200">
@@ -1262,8 +1262,8 @@ noi_dung: isAgentLimit
         </div>
       )}
 
-      {/* ═══════════════════ FLOATING RIGHT SIDEBAR ═══════════════════ */}
-      <div className="fixed right-3 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-2 bg-[#1e1f20]/90 backdrop-blur-md border border-white/10 rounded-2xl p-1.5 shadow-2xl">
+      {/* ═══════════════════ FLOATING RIGHT SIDEBAR (Only visible on wide screens xl+) ═══════════════════ */}
+      <div className="hidden xl:flex fixed right-3 top-1/2 -translate-y-1/2 z-30 flex-col gap-2 bg-[#1e1f20]/90 backdrop-blur-md border border-white/10 rounded-2xl p-1.5 shadow-2xl">
         {[
           { tab: 'chat', icon: <MessageSquare size={18} />, label: 'Chat' },
           { tab: 'code', icon: <Code size={18} />, label: 'Code' },
