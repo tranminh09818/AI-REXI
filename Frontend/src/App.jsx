@@ -886,7 +886,7 @@ noi_dung: isAgentLimit
           {/* TAB 4: IPTV LIVE TV */}
           {activeTab === 'iptv' && (
             <IPTVTab
-              iptvTab={iptvMode} setIptvTab={setIptvMode}
+              iptvTab={iptvTab} setIptvTab={setIptvTab}
               iptvCategory={iptvCategory} setIptvCategory={setIptvCategory}
               iptvCountry={iptvCountry} setIptvCountry={setIptvCountry}
               iptvSearch={iptvSearch} setIptvSearch={setIptvSearch}
