@@ -20,34 +20,34 @@ export default function IPTVTab({
   const safeChannels = iptvChannels || [];
 
   useEffect(() => {
-    if (!selectedChannel && iptvVideoRef.current) {
+    if (!selectedChannel && iptvVideoRef?.current) {
       iptvVideoRef.current.pause();
       iptvVideoRef.current.removeAttribute('src');
       iptvVideoRef.current.load();
     }
-  }, [selectedChannel]);
+  }, [selectedChannel, iptvVideoRef]);
 
   useEffect(() => {
     return () => {
-      if (iptvVideoRef.current) {
+      if (iptvVideoRef?.current) {
         iptvVideoRef.current.pause();
         iptvVideoRef.current.removeAttribute('src');
       }
     };
-  }, []);
+  }, [iptvVideoRef]);
 
   const handleStop = () => {
-    if (iptvVideoRef.current) {
+    if (iptvVideoRef?.current) {
       iptvVideoRef.current.pause();
       iptvVideoRef.current.removeAttribute('src');
       iptvVideoRef.current.load();
     }
-    setSelectedChannel(null);
+    setSelectedChannel?.(null);
   };
 
   const handleSelectChannel = (ch) => {
-    setSelectedChannel(ch);
-    if (iptvVideoRef.current && ch.url) {
+    setSelectedChannel?.(ch);
+    if (iptvVideoRef?.current && ch?.url) {
       iptvVideoRef.current.src = ch.url;
       iptvVideoRef.current.load();
       iptvVideoRef.current.play().catch(() => {});
