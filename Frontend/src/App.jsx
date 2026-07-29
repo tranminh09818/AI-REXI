@@ -22,6 +22,7 @@ import IPTVTab from './components/IPTVTab';
 import SettingsModal from './components/SettingsModal';
 import SkillsModal from './components/SkillsModal';
 import SuperToolsModal from './components/SuperToolsModal';
+import AdminPanel from './AdminPanel';
 
 const API_BASE = "http://localhost:5000/api";
 
@@ -86,6 +87,7 @@ export default function App() {
   const [inputText, setInputText] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [superToolsOpen, setSuperToolsOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -97,7 +99,8 @@ export default function App() {
   const [forgotStep, setForgotStep] = useState('login');
   const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
   const [forgotMessage, setForgotMessage] = useState('');
-  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'code' | 'files' | 'iptv' | 'desktop'
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('rexi_activeTab') || 'chat'); // 'chat' | 'code' | 'files' | 'iptv' | 'desktop'
+  const handleSetActiveTab = (tab) => { setActiveTab(tab); localStorage.setItem('rexi_activeTab', tab); };
   const [filesDrawerOpen, setFilesDrawerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -162,6 +165,17 @@ export default function App() {
   // Rate Limit Toast
   const [rateLimitToast, setRateLimitToast] = useState('');
   const rateLimitTimerRef = useRef(null);
+
+  // General Toast
+  const [toastMsg, setToastMsg] = useState('');
+  const [toastType, setToastType] = useState('success');
+  const toastTimerRef = useRef(null);
+  const showToast = (msg, type = 'success') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToastMsg(msg);
+    setToastType(type);
+    toastTimerRef.current = setTimeout(() => setToastMsg(''), 3000);
+  };
 
   const [selectedProvider, setSelectedProvider] = useState(() => localStorage.getItem('rexi_provider') || 'gemini');
 
@@ -607,7 +621,7 @@ noi_dung: isAgentLimit
         const data = await res.json();
         setSelectedFile(fileRelPath);
         setFileContent(data.content);
-        setActiveTab('code');
+        handleSetActiveTab('code');
       }
     } catch (e) { console.error(e); }
   };
@@ -731,7 +745,7 @@ noi_dung: isAgentLimit
       {/* ═══════════════════ SIDEBAR NAVIGATION ═══════════════════ */}
       <Sidebar
         sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen}
-        activeTab={activeTab} setActiveTab={setActiveTab}
+        activeTab={activeTab} setActiveTab={handleSetActiveTab}
         conversations={conversations} filteredConvs={filteredConvs}
         searchQuery={searchQuery} setSearchQuery={setSearchQuery}
         activeConvId={activeConvId} setActiveConvId={setActiveConvId}
@@ -741,7 +755,8 @@ noi_dung: isAgentLimit
         renderTree={renderTree} fileTree={fileTree}
         setSkillsOpen={setSkillsOpen} setSuperToolsOpen={setSuperToolsOpen}
         currentUser={currentUser} setCurrentUser={setCurrentUser} setAuthToken={setAuthToken}
-        setAuthModalOpen={setAuthModalOpen} setSettingsOpen={setSettingsOpen}
+        setAuthModalOpen={setAuthModalOpen} setSettingsOpen={setSettingsOpen} setAdminOpen={setAdminOpen}
+        apiFetch={apiFetch} API_BASE={API_BASE} showToast={showToast}
       />
 
       {/* ═══════════════════ MAIN WORKSPACE AREA ═══════════════════ */}
@@ -1132,9 +1147,8 @@ noi_dung: isAgentLimit
                 <button type="button" onClick={() => { setForgotStep('request'); setForgotMessage(''); }} className="w-full text-xs text-slate-500 hover:text-white transition-colors">Gửi lại OTP</button>
               </div>
             ) : (
-            <div>
-            <>
-            <div className="flex flex-col items-center pt-2 pb-2">
+              <div className="auth-login-wrapper">
+              <div className="flex flex-col items-center pt-2 pb-2">
               <img src="/rexi_cat_icon.png" alt="Logo" className="rexi-logo w-12 h-12 object-contain" />
               <span className="text-xs text-white/50 font-semibold tracking-widest mt-1">AI Rexi</span>
             </div>
@@ -1206,9 +1220,8 @@ noi_dung: isAgentLimit
                </svg>
                Đăng nhập với Google
              </button>
-             </>
-             </div>
-             )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1273,7 +1286,7 @@ noi_dung: isAgentLimit
         ].map(item => (
           <button
             key={item.tab}
-            onClick={() => setActiveTab(item.tab)}
+            onClick={() => { handleSetActiveTab(item.tab); }}
             title={item.label}
             className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
               activeTab === item.tab
@@ -1286,6 +1299,19 @@ noi_dung: isAgentLimit
         ))}
       </div>
 
+      {/* Admin Panel Modal */}
+      {adminOpen && currentUser?.phan_quyen === 'admin' && (
+        <AdminPanel token={authToken} currentUser={currentUser} onClose={() => setAdminOpen(false)} />
+      )}
+
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className={"fixed bottom-6 right-6 z-[9999] px-4 py-3 rounded-xl shadow-2xl backdrop-blur-md border flex items-center gap-3 text-sm font-medium transition-all duration-300 animate-slide-up " + (toastType === 'success' ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-200' : toastType === 'error' ? 'bg-rose-500/20 border-rose-500/30 text-rose-200' : 'bg-cyan-500/20 border-cyan-500/30 text-cyan-200')}>
+          <span>{toastType === 'success' ? '✅' : toastType === 'error' ? '❌' : 'ℹ️'}</span>
+          <span>{toastMsg}</span>
+          <button onClick={() => setToastMsg('')} className="ml-2 opacity-60 hover:opacity-100 transition-opacity">\u00D7</button>
+        </div>
+      )}
     </div>
   );
 }

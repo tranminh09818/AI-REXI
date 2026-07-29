@@ -109,12 +109,12 @@ router.delete('/conversations/:id', authMiddleware, (req, res) => {
 });
 
 
-// ADMIN: Phan hoi tin nhan trong cuoc hoi thoai (vai_tro: 'admin')
+// ADMIN: Phản hồi tin nhắn trong cuộc hội thoại (vai_tro: 'admin')
 router.post('/admin/conversations/:id/reply', [authMiddleware, adminMiddleware], (req, res) => {
   const { id } = req.params;
   const { noi_dung } = req.body;
   if (!noi_dung || !noi_dung.trim()) {
-    return res.status(400).json({ error: 'Noi dung tin nhan khong duoc trong' });
+    return res.status(400).json({ error: 'Nội dung tin nhắn không được trống' });
   }
   const maTinNhan = crypto.randomUUID();
   db.run(
@@ -153,29 +153,7 @@ router.post('/admin/conversations/:id/restore', [authMiddleware, adminMiddleware
   });
 });
 
-router.post("/admin/conversations/:id/reply", [authMiddleware, adminMiddleware], (req, res) => {
-  const { id } = req.params;
-  const { noi_dung } = req.body;
-  if (!noi_dung || !noi_dung.trim()) {
-    return res.status(400).json({ error: "Noi dung tin nhan khong duoc trong" });
-  }
-  const maTinNhan = crypto.randomUUID();
-  db.run(
-    "INSERT INTO tin_nhan (ma_tin_nhan, ma_hoi_thoai, vai_tro, noi_dung) VALUES (?, ?, admin, ?)",
-    [maTinNhan, id, noi_dung.trim()],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      db.run("UPDATE cuoc_hoi_thoai SET ngay_cap_nhat = CURRENT_TIMESTAMP WHERE ma_hoi_thoai = ?", [id]);
-      res.json({
-        ma_tin_nhan: maTinNhan,
-        ma_hoi_thoai: id,
-        vai_tro: "admin",
-        noi_dung: noi_dung.trim(),
-        admin_name: req.user.ten_day_du || req.user.email
-      });
-    }
-  );
-});
+
 // ADMIN: Xóa vĩnh viễn cuộc hội thoại
 router.delete('/admin/conversations/:id/permanent', [authMiddleware, adminMiddleware], (req, res) => {
   const { id } = req.params;
@@ -619,10 +597,21 @@ db.all("SELECT vai_tro, noi_dung FROM tin_nhan WHERE ma_hoi_thoai = ? ORDER BY n
           
           const skillPrompts = [];
           for (const skill of allSkills) {
-            const skillDir = path.join(process.env.USERPROFILE || process.env.HOME, '.agents', 'skills', skill.ten_ky_nang);
-            const skillMdPath = path.join(skillDir, 'SKILL.md');
-            if (fs.existsSync(skillMdPath)) {
-              const skillContent = fs.readFileSync(skillMdPath, 'utf8');
+            const possiblePaths = [
+              path.join(__dirname, '..', '..', '..', '.agents', 'skills', skill.ten_ky_nang, 'SKILL.md'),
+              path.join(process.env.USERPROFILE || process.env.HOME, '.agents', 'skills', skill.ten_ky_nang, 'SKILL.md'),
+              path.join(process.env.USERPROFILE || process.env.HOME, '.gemini', 'config', 'skills', skill.ten_ky_nang, 'SKILL.md')
+            ];
+            let skillContent = null;
+            for (const p of possiblePaths) {
+              if (fs.existsSync(p)) {
+                try {
+                  skillContent = fs.readFileSync(p, 'utf8');
+                  break;
+                } catch (e) {}
+              }
+            }
+            if (skillContent) {
               skillPrompts.push(`🎯 **${skill.tieu_de}** (${skill.ten_ky_nang}):\n${skillContent.substring(0, 1500)}`);
             } else {
               skillPrompts.push(`🎯 **${skill.tieu_de}**: ${skill.mo_ta}`);

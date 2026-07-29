@@ -49,6 +49,7 @@ app.use(session({
 app.use('/api', rateLimitMiddleware);
 
 const { promptNormalizerMiddleware } = require('./src/middleware/promptNormalizer.middleware');
+const adminRoutes = require('./src/routes/admin.routes');
 
 // Apply Teencode Normalization
 app.use(promptNormalizerMiddleware);
@@ -58,6 +59,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/services', servicesRoutes);
 app.use('/api/workspace', workspaceRoutes);
+app.use('/api/admin', adminRoutes);
 
 // (Tùy chọn) Phục vụ ứng dụng React đã build cho môi trường production
 const frontendBuildPath = path.join(__dirname, '..', 'Frontend', 'build');
@@ -68,7 +70,11 @@ if (fs.existsSync(frontendBuildPath)) {
     });
 }
 
-// Khởi động server
+// Khởi động server + auto-scanner IPTV
+const { startScheduler } = require('./src/scheduler');
 app.listen(PORT, () => {
   console.log(`[Server] AI REXI Backend đang chạy tại http://localhost:${PORT}`);
+  if (process.env.ENABLE_IPTV_SCHEDULER !== 'false') {
+    startScheduler();
+  }
 });

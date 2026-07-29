@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Menu, Plus, MessageSquare, Code, Folder, Tv, Monitor,
   Layers, Zap, Search, Trash2, ChevronDown, FolderOpen,
-  User, Settings, LogOut
+  User, Settings, LogOut, Headphones, Shield
 } from 'lucide-react';
 
 const RexiLogo = ({ className = "w-8 h-8" }) => (
@@ -17,7 +17,8 @@ export default function Sidebar({
   handleNewConversation, handleDeleteConversation,
   filesDrawerOpen, setFilesDrawerOpen, renderTree, fileTree,
   setSkillsOpen, setSuperToolsOpen,
-  currentUser, setCurrentUser, setAuthToken, setAuthModalOpen, setSettingsOpen
+  currentUser, setCurrentUser, setAuthToken, setAuthModalOpen, setSettingsOpen, setAdminOpen,
+  apiFetch, API_BASE, showToast
 }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
@@ -31,12 +32,48 @@ export default function Sidebar({
   }, []);
 
   const handleLogout = () => {
-    if (!window.confirm('Ban co chac chan muon dang xuat?')) return;
+    if (!window.confirm('Bạn có chắc chắn muốn đăng xuất?')) return;
     setCurrentUser(null);
     setAuthToken('');
     localStorage.removeItem('rexi_token');
     localStorage.removeItem('rexi_user');
     setUserMenuOpen(false);
+  };
+
+  const handleContactAdmin = async () => {
+    if (!currentUser) { setAuthModalOpen(true); return; }
+    try {
+      const res = await apiFetch(`${API_BASE}/chat/conversations`, {
+        method: 'POST',
+        body: JSON.stringify({ tieu_de: '[Admin] Hỗ trợ & Phản hồi' })
+      });
+      const data = await res.json();
+      if (data.ma_hoi_thoai) {
+        setConversations(prev => [data, ...prev]);
+        setActiveConvId(data.ma_hoi_thoai);
+        setActiveTab('chat');
+        setUserMenuOpen(false);
+        showToast('Đã tạo cuộc trò chuyện với Admin', 'success');
+      } else {
+        showToast(data.error || 'Không thể tạo cuộc trò chuyện', 'error');
+      }
+    } catch(e) {
+      console.error('Contact admin error:', e);
+      showToast('Lỗi kết nối server', 'error');
+    }
+  };
+
+  const handleAdminPanel = () => {
+    if (!currentUser) {
+      showToast('Vui lòng đăng nhập để truy cập Quản trị viên', 'error');
+      setAuthModalOpen(true);
+      return;
+    }
+    if (currentUser.phan_quyen !== 'admin') {
+      showToast('Chức năng này chỉ dành cho Quản trị viên. Bạn không có quyền truy cập.', 'error');
+      return;
+    }
+    setAdminOpen(true);
   };
 
   return (
@@ -185,6 +222,10 @@ export default function Sidebar({
                   <p className="text-xs font-bold text-white truncate">{currentUser.ten_day_du}</p>
                   <p className="text-[10px] text-slate-400 truncate">{currentUser.email}</p>
                 </div>
+                <button type="button" onClick={handleContactAdmin} className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-amber-400 hover:bg-white/5 transition-colors">
+                  <Headphones size={13} /> Nhắn Admin
+                </button>
+                <div className="border-t border-white/5 my-0.5"></div>
                 <button type="button" onClick={handleLogout} className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-rose-400 hover:bg-white/5 transition-colors">
                   <LogOut size={13} /> Đăng xuất
                 </button>
@@ -200,6 +241,9 @@ export default function Sidebar({
           </button>
         )}
         <div className="flex items-center gap-1">
+          <button onClick={handleAdminPanel} className="p-1.5 rounded-lg hover:bg-white/10 text-amber-400/60 hover:text-amber-400 transition-colors" title="Quản trị viên">
+            <Shield size={16} />
+          </button>
           <button onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors" title="Cài đặt hệ thống">
             <Settings size={16} />
           </button>

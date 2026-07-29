@@ -654,10 +654,8 @@ function SettingsTab({ token, showToast }) {
 // ═══════════════════════════════════════════════════════════
 // MAIN ADMIN PANEL
 // ═══════════════════════════════════════════════════════════
-export default function AdminPanel() {
-  const token = localStorage.getItem('rexi_token') || '';
-  const storedUser = localStorage.getItem('rexi_user');
-  const currentUser = storedUser ? JSON.parse(storedUser) : null;
+export default function AdminPanel({ token, currentUser, onClose }) {
+  // token and currentUser passed as props from App.jsx
   const [activeTab, setActiveTab] = useState('dashboard');
   const [stats, setStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -665,7 +663,7 @@ export default function AdminPanel() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
-    if (!token || !currentUser || currentUser.phan_quyen !== 'admin') window.location.href = '/';
+    if (!token || !currentUser || currentUser.phan_quyen !== 'admin') { if (onClose) onClose(); else window.location.href = '/'; }
   }, []);
 
   const showToast = (message, type = 'success') => setToast({ message, type });
@@ -730,6 +728,7 @@ export default function AdminPanel() {
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-amber-400 flex items-center gap-1"><Crown size={10} /> {currentUser.ten_day_du}</span>
             <button onClick={() => { fetchStats(); }} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400"><RefreshCw size={14} /></button>
+            {onClose && <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white"><X size={14} /></button>}
           </div>
         </header>
         <main className="flex-1 overflow-y-auto p-6">{renderTab()}</main>
