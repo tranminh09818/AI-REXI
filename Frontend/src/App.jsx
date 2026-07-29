@@ -893,6 +893,7 @@ noi_dung: isAgentLimit
               iptvChannels={iptvChannels} selectedChannel={selectedChannel}
               setSelectedChannel={setSelectedChannel} fetchIPTV={fetchIPTV}
               iptvVideoRef={iptvVideoRef}
+              iptvSubtitleOn={iptvSubtitleOn} setIptvSubtitleOn={setIptvSubtitleOn}
             />
           )}
 
