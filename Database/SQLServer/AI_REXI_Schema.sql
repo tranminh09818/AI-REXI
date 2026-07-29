@@ -23,6 +23,7 @@ CREATE TABLE nguoi_dung (
     ngay_tao        DATETIME2       DEFAULT SYSDATETIME(),
     ngay_cap_nhat   DATETIME2       DEFAULT SYSDATETIME(),
     phan_quyen      NVARCHAR(20)    DEFAULT 'user',
+    trang_thai      NVARCHAR(20)    DEFAULT 'active',  -- Đã thêm: dùng cho Khoá/Mở khoá tài khoản
     otp_code        NVARCHAR(10),
     otp_expiry      BIGINT
 );

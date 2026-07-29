@@ -22,7 +22,8 @@ function resolveWorkspacePath(relativePath) {
 }
 
 router.get('/files', authMiddleware, (req, res) => {
-  function scanDir(dirPath, relativeDir = '') {
+  function scanDir(dirPath, relativeDir = '', depth = 0) {
+    if (depth > 8) return [];
     const items = fs.readdirSync(dirPath, { withFileTypes: true });
     const result = [];
 
@@ -37,7 +38,7 @@ router.get('/files', authMiddleware, (req, res) => {
           name: item.name,
           path: itemRelPath,
           type: 'folder',
-          children: scanDir(fullPath, itemRelPath)
+          children: scanDir(fullPath, itemRelPath, depth + 1)
         });
       } else {
         result.push({
@@ -60,11 +61,13 @@ router.get('/files', authMiddleware, (req, res) => {
 
 // Helper: validate path không thoát khỏi rootDir (chống path traversal)
 function safePath(rootDir, relPath) {
+  if (relPath.includes('\0')) return null;
   const fullPath = path.resolve(rootDir, relPath);
-  if (!fullPath.startsWith(path.resolve(rootDir))) {
-    return null; // path traversal detected
+  const relative = path.relative(rootDir, fullPath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    return null;
   }
-  return fullPath;
+return fullPath;
 }
 
 router.get('/file-content', authMiddleware, (req, res) => {

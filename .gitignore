@@ -25,3 +25,19 @@ backend.log
 Thumbs.db
 .DS_Store
 
+
+# API key docs & secrets
+DANH_SACH_API_KEY.md
+*.env*
+
+# Temporary scratch & session files
+_test_*.js
+_syntax_*.js
+_create_*.js
+*_dump*.txt
+restored_*.txt
+services_snippet.txt
+found_step.json
+tmp_*.js
+refactor*.cjs
+

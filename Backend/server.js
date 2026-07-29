@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const session = require('express-session');
+const crypto = require('crypto');
 const fs = require('fs');
 
 // Import các routes của bạn
@@ -9,26 +10,43 @@ const authRoutes = require('./src/routes/auth.routes');
 const chatRoutes = require('./src/routes/chat.routes');
 const servicesRoutes = require('./src/routes/services.routes');
 const workspaceRoutes = require('./src/routes/workspace.routes');
+const { rateLimitMiddleware } = require('./src/middleware/rateLimit.middleware');
 
 // Khởi tạo ứng dụng Express
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Cấu hình Middleware
+// Cấu hình CORS - chỉ chấp nhận frontend đang dùng
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ['http://localhost:5173'];
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5174'],
+  origin: (origin, callback) => {
+    // Cho phép requests không có origin (mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error('CORS không cho phép origin này: ' + origin));
+  },
   credentials: true
 }));
-app.use(express.json({ limit: '50mb' })); // Tăng giới hạn để xử lý file lớn (PDF, ảnh...)
+app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Cấu hình Session cho Guest Middleware (giới hạn 5 tin nhắn)
+// Session secret - TẠO RANDOM nếu không có env var (tốt hơn hardcode)
+const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'a-very-secret-session-key-for-rexi-ai',
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: true,
-  cookie: { secure: process.env.NODE_ENV === 'production' } // 'secure: true' nếu dùng HTTPS
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 giờ
+  }
 }));
+
+// Áp dụng Rate Limiting cho TẤT CẢ API routes (trừ static files)
+app.use('/api', rateLimitMiddleware);
 
 const { promptNormalizerMiddleware } = require('./src/middleware/promptNormalizer.middleware');
 

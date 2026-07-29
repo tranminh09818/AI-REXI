@@ -79,16 +79,16 @@ html, body, #root {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* ── Custom Visible Scrollbar ── */
+/* ── Hidden Scrollbar (ẩn thanh cuộn, vẫn cuộn chuột bình thường) ── */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
-
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.1); border-radius: 4px; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.25); border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(6, 182, 212, 0.6); }
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
 
 /* ── Prose — AI markdown ── */
 .prose-rexi { line-height: 1.75; }
@@ -172,4 +172,27 @@ html, body, #root {
 select {
   -webkit-appearance: none;
   appearance: none;
+}
+
+/* ── Rexi Logo Hover Effect ── */
+.rexi-logo {
+  filter: brightness(0) invert(1) drop-shadow(0 0 8px rgba(34,211,238,0.6));
+  transition: transform 0.3s ease, filter 0.3s ease;
+  cursor: pointer;
+}
+.rexi-logo:hover {
+  transform: scale(1.15);
+  filter: brightness(0) invert(1) drop-shadow(0 0 12px rgba(244,114,182,0.8)) drop-shadow(0 0 20px rgba(168,85,247,0.5));
+}
+
+/* Con mèo KHÔNG phát sáng (dùng trong tin nhắn chat) */
+.rexi-logo-no-glow {
+  filter: brightness(0) invert(1) !important;
+  transition: none !important;
+  cursor: default !important;
+}
+.rexi-logo-no-glow:hover {
+  transform: none !important;
+  filter: brightness(0) invert(1) !important;
+  drop-shadow: none !important;
 }

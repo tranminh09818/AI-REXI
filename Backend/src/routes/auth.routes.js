@@ -1,16 +1,14 @@
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
-const jwt = 'jsonwebtoken';
+const jwt = require('jsonwebtoken');
 const db = require('../config/db');
-const crypto = require('crypto');
-const { authMiddleware, adminMiddleware } = require('../middleware/auth.middleware');
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your-very-secret-key-for-rexi-ai';
+const { authMiddleware, adminMiddleware, JWT_SECRET } = require('../middleware/auth.middleware');
 
 function generateToken(user) {
     const payload = { id: user.ma_nguoi_dung, role: user.phan_quyen };
-    return require(jwt).sign(payload, JWT_SECRET, { expiresIn: '7d' });
+    return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 }
 
 function sanitizeUser(user) {
@@ -66,9 +64,10 @@ function findOrCreateUser(email, name, avatar, provider, done) {
 
 // Đăng ký
 router.post('/register', async (req, res) => {
-    const { email, password, ten_day_du } = req.body;
-    if (!email || !password) {
-        return res.status(400).json({ error: 'Email và mật khẩu là bắt buộc.' });
+    const { account, email, password, ten_day_du } = req.body;
+    const accountName = (account || email || '').trim();
+    if (!accountName || !password) {
+        return res.status(400).json({ error: 'Tài khoản và mật khẩu là bắt buộc.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -76,7 +75,7 @@ router.post('/register', async (req, res) => {
 
     db.run(
         "INSERT INTO nguoi_dung (ma_nguoi_dung, email, mat_khau_ma_hoa, ten_day_du, phan_quyen) VALUES (?, ?, ?, ?, 'user')",
-        [maUser, email, hashedPassword, ten_day_du || 'Người dùng mới'],
+        [maUser, accountName, hashedPassword, ten_day_du || 'Người dùng mới'],
         (err) => {
             if (err) {
                 return res.status(500).json({ error: 'Email này có thể đã tồn tại.' });
@@ -88,12 +87,13 @@ router.post('/register', async (req, res) => {
 
 // Đăng nhập
 router.post('/login', (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) {
-        return res.status(400).json({ error: 'Vui lòng nhập email và mật khẩu.' });
+    const { account, email, password } = req.body;
+    const accountName = (account || email || '').trim();
+    if (!accountName || !password) {
+        return res.status(400).json({ error: 'Vui lòng nhập tài khoản và mật khẩu.' });
     }
 
-    db.get("SELECT * FROM nguoi_dung WHERE email = ?", [email], async (err, user) => {
+    db.get("SELECT * FROM nguoi_dung WHERE email = ?", [accountName], async (err, user) => {
         if (err || !user) {
             return res.status(401).json({ error: 'Email hoặc mật khẩu không đúng.' });
         }
@@ -153,15 +153,16 @@ router.post('/google', (req, res) => {
 
 // Quên mật khẩu — tạo OTP code 6 số
 router.post('/forgot-password', (req, res) => {
-    const { email } = req.body;
-    if (!email) {
-        return res.status(400).json({ error: 'Vui lòng nhập email.' });
+    const { account, email } = req.body;
+    const accountName = (account || email || '').trim();
+    if (!accountName) {
+        return res.status(400).json({ error: 'Vui lòng nhập tài khoản.' });
     }
 
-    db.get("SELECT * FROM nguoi_dung WHERE email = ?", [email], (err, user) => {
+    db.get("SELECT * FROM nguoi_dung WHERE email = ?", [accountName], (err, user) => {
         // Luôn trả về thành công để tránh leak email tồn tại
         if (err || !user) {
-            return res.json({ success: true, message: 'Nếu email tồn tại, vui lòng kiểm tra mã OTP.' });
+            return res.json({ success: true, message: 'Nếu tài khoản tồn tại, mã OTP đã được tạo.' });
         }
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -175,8 +176,10 @@ router.post('/forgot-password', (req, res) => {
                     return res.status(500).json({ error: 'Lỗi hệ thống.' });
                 }
                 // Trong production gửi email, o day tra ve truc tiep de debug
-                console.log(`[Auth] OTP for ${email}: ${otpCode}`);
-                res.json({ success: true, message: 'Mã OTP đã được tạo.', otp_debug: otpCode });
+                console.log(`[Auth] OTP for ${accountName}: ${otpCode}`);
+                const payload = { success: true, message: 'Mã OTP đã được tạo.' };
+                if (process.env.NODE_ENV !== 'production') payload.otp_debug = otpCode;
+                res.json(payload);
             }
         );
     });
@@ -184,17 +187,18 @@ router.post('/forgot-password', (req, res) => {
 
 // Xác nhận OTP và đặt mật khẩu mới
 router.post('/reset-password', async (req, res) => {
-    const { email, otp_code, new_password } = req.body;
-    if (!email || !otp_code || !new_password) {
+    const { account, email, otp_code, new_password } = req.body;
+    const accountName = (account || email || '').trim();
+    if (!accountName || !otp_code || !new_password) {
         return res.status(400).json({ error: 'Vui lòng nhập đầy đủ thông tin.' });
     }
     if (new_password.length < 6) {
         return res.status(400).json({ error: 'Mật khẩu mới tối thiểu 6 ký tự.' });
     }
 
-    db.get("SELECT * FROM nguoi_dung WHERE email = ?", [email], async (err, user) => {
+    db.get("SELECT * FROM nguoi_dung WHERE email = ?", [accountName], async (err, user) => {
         if (err || !user) {
-            return res.status(400).json({ error: 'Email không tồn tại.' });
+            return res.status(400).json({ error: 'Tài khoản không tồn tại.' });
         }
 
         // Kiem tra OTP
@@ -239,7 +243,7 @@ router.get('/users', [authMiddleware, adminMiddleware], (req, res) => {
         const totalPages = Math.ceil(totalUsers / limit);
 
         const dataQuery = `
-            SELECT ma_nguoi_dung, email, ten_day_du, phan_quyen, ngay_tao 
+            SELECT ma_nguoi_dung, email, ten_day_du, phan_quyen, trang_thai, anh_dai_dien, ngay_tao 
             FROM nguoi_dung 
             ${search ? searchCondition : ''}
             ORDER BY ngay_tao DESC 

@@ -35,6 +35,7 @@ class SQLiteAdapter {
 
   _init() {
     this.db.run("PRAGMA foreign_keys = ON;");
+    this.db.run("ALTER TABLE bo_nho_dai_han ADD COLUMN ma_nguoi_dung TEXT", () => {});
     this.db.run("ALTER TABLE cuoc_hoi_thoai ADD COLUMN ngay_xoa DATETIME", () => {});
     this.db.run("ALTER TABLE nguoi_dung ADD COLUMN anh_dai_dien TEXT", () => {});
     this.db.run("ALTER TABLE nguoi_dung ADD COLUMN otp_code TEXT", () => {});

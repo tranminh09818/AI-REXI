@@ -7,12 +7,21 @@ import {
   Globe, ChevronDown, Zap, MessageSquare, MoreHorizontal,
   ThumbsUp, ThumbsDown, RefreshCw, Edit3, Star, Play, ArrowUp, ArrowDown,
   Sparkles, Monitor, Sun, Moon, Tv, Eye, Code, Layout, Sliders,
-  ChevronRight, Activity, Terminal, Shield, Radio, HeartPulse, Wifi, FileSpreadsheet, Presentation, LogOut, LogIn, Lock, ToggleLeft, ToggleRight, Server, GitBranch, GitCommit
+  ChevronRight, Activity, Terminal, Shield, Radio, HeartPulse, Wifi, FileSpreadsheet, Presentation, LogOut, LogIn, Lock, ToggleLeft, ToggleRight, Server, GitBranch, GitCommit, EyeOff
 } from 'lucide-react';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/tokyo-night-dark.css';
 import Hls from 'hls.js';
+
+// Components
+import Sidebar from './components/Sidebar';
+import ChatTab from './components/ChatTab';
+import CodeEditorTab from './components/CodeEditorTab';
+import IPTVTab from './components/IPTVTab';
+import SettingsModal from './components/SettingsModal';
+import SkillsModal from './components/SkillsModal';
+import SuperToolsModal from './components/SuperToolsModal';
 
 const API_BASE = "http://localhost:5000/api";
 
@@ -26,7 +35,7 @@ marked.setOptions({
 
 // Rexi Animated SVG Logo Component
 const RexiLogo = ({ className = "w-8 h-8" }) => (
-  <img src="/rexi_cat_icon.png" alt="Rexi" className={`object-contain ${className}`} />
+  <img src="/rexi_cat_icon.png" alt="Rexi" className={`rexi-logo object-contain ${className}`} />
 );
 
 const POPULAR_MODELS = [
@@ -81,6 +90,13 @@ export default function App() {
   const [superToolsOpen, setSuperToolsOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState('login');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotOtp, setForgotOtp] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotStep, setForgotStep] = useState('login');
+  const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState('');
   const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'code' | 'files' | 'iptv' | 'desktop'
   const [filesDrawerOpen, setFilesDrawerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -127,6 +143,10 @@ export default function App() {
   // Desktop Remote State
   const [desktopScreenshot, setDesktopScreenshot] = useState(null);
   const [desktopLoading, setDesktopLoading] = useState(false);
+  const [desktopError, setDesktopError] = useState(null);
+
+  // Guest Limits State
+  const [guestLimits, setGuestLimits] = useState({ messages: { used: 0, limit: 10, remaining: 10 }, agentTasks: { used: 0, limit: 3, remaining: 3 } });
 
   // Live Canvas state
   const [liveHtml, setLiveHtml] = useState('');
@@ -139,6 +159,12 @@ export default function App() {
   const [memories, setMemories] = useState([]);
   const [newMemory, setNewMemory] = useState('');
 
+  // Rate Limit Toast
+  const [rateLimitToast, setRateLimitToast] = useState('');
+  const rateLimitTimerRef = useRef(null);
+
+  const [selectedProvider, setSelectedProvider] = useState(() => localStorage.getItem('rexi_provider') || 'gemini');
+
   // Auth Token
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('rexi_token') || '');
 
@@ -146,6 +172,12 @@ export default function App() {
     const h = { 'Content-Type': 'application/json' };
     if (authToken) h['Authorization'] = `Bearer ${authToken}`;
     return h;
+  };
+
+  // Helper fetch chung: luôn gửi cookie session (cho Guest limits) + token đăng nhập
+  const apiFetch = (url, options = {}) => {
+    const headers = { ...authHeaders(), ...(options.headers || {}) };
+    return fetch(url, { ...options, headers, credentials: 'include' });
   };
 
   // User Profile
@@ -162,6 +194,26 @@ export default function App() {
   const [authFullName, setAuthFullName] = useState('');
 
   const chatScrollRef = useRef(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+
+  // Hiện/ẩn 2 nút cuộn lên-xuống theo vị trí cuộn
+  const handleChatScroll = (e) => {
+    const el = e.currentTarget;
+    const distFromTop = el.scrollTop;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollTop(distFromTop > 220);
+    setShowScrollBottom(distFromBottom > 220);
+  };
+
+  const scrollToTopSmooth = () => {
+    chatScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const scrollToBottomSmooth = () => {
+    const el = chatScrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -176,7 +228,18 @@ export default function App() {
     fetchDbSkills();
     fetchGitStatus();
     fetchMemories();
+    if (!currentUser) fetchGuestLimits();
   }, []);
+
+  const fetchGuestLimits = async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/chat/guest-limits`);
+      const data = await res.json();
+      if (data.success && data.limits && data.limits.messages) {
+        setGuestLimits(data.limits);
+      }
+    } catch (e) { /* ignore */ }
+  };
 
   useEffect(() => {
     if (activeConvId) {
@@ -186,15 +249,19 @@ export default function App() {
     }
   }, [activeConvId]);
 
-  useEffect(() => {
-    if (chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-    }
-  }, [messages, loading]);
+useEffect(() => {
+     if (chatScrollRef.current) {
+       const el = chatScrollRef.current;
+       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+       if (nearBottom) {
+         el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+       }
+     }
+   }, [messages, loading]);
 
   const fetchConversations = async () => {
     try {
-      const res = await fetch(`${API_BASE}/chat/conversations`, { headers: authHeaders() });
+      const res = await apiFetch(`${API_BASE}/chat/conversations`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setConversations(data);
@@ -207,7 +274,7 @@ export default function App() {
 
   const fetchMessages = async (convId) => {
     try {
-      const res = await fetch(`${API_BASE}/chat/conversations/${convId}/messages`, { headers: authHeaders() });
+      const res = await apiFetch(`${API_BASE}/chat/conversations/${convId}/messages`);
       if (res.ok) {
         const data = await res.json();
         setMessages(data);
@@ -217,7 +284,7 @@ export default function App() {
 
   const fetchFileTree = async () => {
     try {
-      const res = await fetch(`${API_BASE}/workspace/files`);
+      const res = await apiFetch(`${API_BASE}/workspace/files`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setFileTree(data);
@@ -227,7 +294,7 @@ export default function App() {
 
   const fetchDbSkills = async () => {
     try {
-      const res = await fetch(`${API_BASE}/services/skills`, { headers: authHeaders() });
+      const res = await apiFetch(`${API_BASE}/services/skills`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setDbSkills(data);
@@ -237,7 +304,7 @@ export default function App() {
 
   const fetchGitStatus = async () => {
     try {
-      const res = await fetch(`${API_BASE}/chat/git/status`, { headers: authHeaders() });
+      const res = await apiFetch(`${API_BASE}/chat/git/status`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setGitStatus(data);
@@ -247,7 +314,7 @@ export default function App() {
 
   const fetchMemories = async () => {
     try {
-      const res = await fetch(`${API_BASE}/chat/memory`, { headers: authHeaders() });
+      const res = await apiFetch(`${API_BASE}/chat/memory`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setMemories(data);
@@ -260,7 +327,7 @@ export default function App() {
       let url = `${API_BASE}/services/iptv/channels?`;
       if (country) url += `country=${country}`;
       else if (cat) url += `category=${cat}`;
-      const res = await fetch(url, { headers: authHeaders() });
+      const res = await apiFetch(url, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         if (data.channels) {
@@ -290,7 +357,7 @@ export default function App() {
       video.src = url;
       video.play().catch(() => {});
     }
-  }, []);
+  }, [iptvVideoRef, hlsRef]);
 
   useEffect(() => {
     if (selectedChannel) playHlsStream(selectedChannel.url);
@@ -298,28 +365,26 @@ export default function App() {
 
   const fetchDesktopScreenshot = async () => {
     setDesktopLoading(true);
+    setDesktopError(null);
     try {
-      // Backend chụp màn hình qua schtasks interactive
-      const res = await fetch(`${API_BASE}/services/desktop/screenshot?t=${Date.now()}`, { headers: authHeaders() });
+      const res = await apiFetch(`${API_BASE}/services/desktop/screenshot?t=${Date.now()}`);
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         setDesktopScreenshot(url);
       } else {
-        // Thử trigger qua schtasks
-        await fetch(`${API_BASE}/chat/exec`, {
-          method: 'POST', headers: authHeaders(),
-          body: JSON.stringify({ command: `powershell -Command "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width,[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $g=[System.Drawing.Graphics]::FromImage($b); $g.CopyFromScreen(0,0,0,0,$b.Size); $b.Save('d:\\AI REXI\\Backend\\temp_screen.jpg',[System.Drawing.Imaging.ImageFormat]::Jpeg); $g.Dispose(); $b.Dispose()"`, 'X-Exec-Confirm': 'yes' })
-        });
-        setDesktopScreenshot(`${API_BASE}/services/desktop/screenshot?t=${Date.now()}`);
+        setDesktopScreenshot(null);
+        setDesktopError(`Server lỗi (${res.status})`);
       }
-    } catch (e) { console.log(e); }
-    finally { setDesktopLoading(false); }
+    } catch (e) {
+      setDesktopScreenshot(null);
+      setDesktopError(e.message || 'Không thể kết nối');
+    } finally { setDesktopLoading(false); }
   };
 
   const fetchGitDiff = async () => {
     try {
-      const res = await fetch(`${API_BASE}/chat/git/diff`, { headers: authHeaders() });
+      const res = await apiFetch(`${API_BASE}/chat/git/diff`, { headers: authHeaders() });
       if (res.ok) { const d = await res.json(); setGitDiff(d.diff || ''); }
     } catch(e) {}
   };
@@ -330,10 +395,13 @@ export default function App() {
   }, [activeTab]);
 
   const handleNewConversation = async () => {
+    // Nếu cuộc trò chuyện hiện tại chưa có tin nhắn nào → không cho tạo thêm
+    if (activeConvId && messages.length === 0) {
+      return; // Đã có cuộc trò chuyện trống, không tạo thêm
+    }
     try {
-      const res = await fetch(`${API_BASE}/chat/conversations`, {
+      const res = await apiFetch(`${API_BASE}/chat/conversations`, {
         method: 'POST',
-        headers: authHeaders(),
         body: JSON.stringify({ tieu_de: 'Trò chuyện mới', ten_mo_hinh_ai: modelName })
       });
       if (res.ok) {
@@ -348,9 +416,11 @@ export default function App() {
   const handleDeleteConversation = async (id, e) => {
     e.stopPropagation();
     try {
-      await fetch(`${API_BASE}/chat/conversations/${id}`, { method: 'DELETE', headers: authHeaders() });
-      setConversations(prev => prev.filter(c => c.ma_hoi_thoai !== id));
-      if (activeConvId === id) setActiveConvId(null);
+      const res = await apiFetch(`${API_BASE}/chat/conversations/${id}`, { method: 'DELETE', headers: authHeaders() });
+      if (res.ok) {
+        setConversations(prev => prev.filter(c => c.ma_hoi_thoai !== id));
+        if (activeConvId === id) setActiveConvId(null);
+      }
     } catch (e) { console.error(e); }
   };
 
@@ -362,8 +432,8 @@ export default function App() {
         reader.readAsDataURL(file);
         reader.onload = () => setAttachedFiles(p => [...p, { name: file.name, isImage: true, dataUrl: reader.result }]);
       } else {
-        reader.readAsText(file);
-        reader.onload = () => setAttachedFiles(p => [...p, { name: file.name, isImage: false, textContent: reader.result }]);
+        reader.readAsDataURL(file);
+        reader.onload = () => setAttachedFiles(p => [...p, { name: file.name, isImage: false, isBinary: true, dataUrl: reader.result }]);
       }
     });
     e.target.value = '';
@@ -376,16 +446,18 @@ export default function App() {
 
     if (attachedFiles.length > 0) {
       attachedFiles.forEach(f => {
-        text += f.isImage ? `\n\n![${f.name}](${f.dataUrl})` : `\n\n\`\`\`${f.name}\n${f.textContent}\n\`\`\``;
+        text += f.isImage ? `\n\n![${f.name}](${f.dataUrl})` :
+          f.isBinary ? `\n\n[File: ${f.name}](${f.dataUrl})` :
+          `\n\n\`\`\`${f.name}\n${f.textContent}\n\`\`\``;
       });
     }
 
     let convId = activeConvId;
     if (!convId) {
-      const res = await fetch(`${API_BASE}/chat/conversations`, {
+      const res = await apiFetch(`${API_BASE}/chat/conversations`, {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ tieu_de: text.substring(0, 30), ten_mo_hinh_ai: modelName })
+        body: JSON.stringify({ tieu_de: text.replace(/!\[.*?\]\(.*?\)/g, '').substring(0, 30), ten_mo_hinh_ai: modelName })
       });
       const data = await res.json();
       convId = data.ma_hoi_thoai;
@@ -400,7 +472,7 @@ export default function App() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE}/chat/conversations/${convId}/messages`, {
+      const res = await apiFetch(`${API_BASE}/chat/conversations/${convId}/messages`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
@@ -418,19 +490,35 @@ export default function App() {
       if (res.ok) {
         const aiMsg = await res.json();
         if (aiMsg.noi_dung && (aiMsg.noi_dung.includes('The filename, directory name') || aiMsg.noi_dung.includes('syntax is incorrect'))) {
-          aiMsg.noi_dung = `Xin chào **${currentUser.ten_day_du}**! Tôi là **AI Rexi Assistant**.\n\nHệ thống đã sẵn sàng 100% với bộ **35+ Skills Agent**, Quản Lý Files Workspace, Live IPTV & Remote Desktop Control. Bạn muốn tôi làm gì giúp bạn?`;
+          aiMsg.noi_dung = `Xin chào **${currentUser?.ten_day_du || 'USER'}**! Tôi là **AI Rexi Assistant**.\n\nHệ thống đã sẵn sàng 100% với bộ **35+ Skills Agent**, Quản Lý Files Workspace, Live IPTV & Remote Desktop Control. Bạn muốn tôi làm gì giúp bạn?`;
         }
         setMessages(prev => [...prev.filter(m => m.ma_tin_nhan !== tempUserMsg.ma_tin_nhan), tempUserMsg, aiMsg]);
         fetchConversations();
-      } else if (res.status === 429) {
-        setRateLimitToast('Quá nhiều yêu cầu trong thời gian ngắn (Rate Limit Exceeded). Vui lòng đợi 1 phút.');
-        setTimeout(() => setRateLimitToast(''), 5000);
+        if (!currentUser) fetchGuestLimits();
+} else if (res.status === 429) {
+         setRateLimitToast('Quá nhiều yêu cầu trong thời gian ngắn (Rate Limit Exceeded). Vui lòng đợi 1 phút.');
+         if (rateLimitTimerRef.current) clearTimeout(rateLimitTimerRef.current);
+         rateLimitTimerRef.current = setTimeout(() => setRateLimitToast(''), 5000);
+      } else if (res.status === 401) {
+        const errorData = await res.json().catch(() => ({}));
+        if (errorData.code === 'LOGIN_REQUIRED' || errorData.code === 'AGENT_LIMIT_REACHED') {
+          const isAgentLimit = errorData.code === 'AGENT_LIMIT_REACHED';
+          setMessages(prev => [...prev.filter(m => m.ma_tin_nhan !== tempUserMsg.ma_tin_nhan), tempUserMsg, {
+            ma_tin_nhan: Date.now().toString(),
+            vai_tro: 'assistant',
+noi_dung: isAgentLimit 
+                ? `🔒 **Đã hết lượt Agent Mode.**\n\nBạn đã dùng hết **3 lượt** Agent cho tài khoản khách.\n\nĐăng nhập để:\n✅ Agent Mode không giới hạn\n✅ Chat không giới hạn\n✅ Lưu lịch sử & Memory`
+                : `🔒 **Đã hết lượt chat.**\n\nBạn đã dùng hết **10 tin nhắn** cho tài khoản khách.\n\nĐăng nhập để:\n✅ Chat không giới hạn\n✅ Agent Mode không giới hạn\n✅ Lưu lịch sử & Memory`
+          }]);
+          fetchGuestLimits();
+          setTimeout(() => setAuthModalOpen(true), 500);
+        }
       }
     } catch (e) {
       setMessages(prev => [...prev, {
         ma_tin_nhan: Date.now().toString(),
         vai_tro: 'assistant',
-        noi_dung: `⚠️ Kết nối API Server thành công. Hãy kiểm tra API Key trong mục Cài Đặt!`
+        noi_dung: `⚠️ Không thể kết nối tới Server Backend (localhost:5000). Hãy kiểm tra Backend đã chạy chưa và API Key trong mục Cài Đặt!`
       }]);
     } finally {
       setLoading(false);
@@ -464,7 +552,7 @@ export default function App() {
         return;
       }
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text.replace(/[*#`_]/g, ''));
+      const utterance = new SpeechSynthesisUtterance(text.replace(/<[^>]*>/g, '').replace(/[*#`_]/g, ''));
       utterance.lang = 'vi-VN';
       utterance.rate = 1.0;
       utterance.onend = () => setSpeakingMsgId(null);
@@ -474,9 +562,32 @@ export default function App() {
   };
 
   const copyToClipboard = (text, id) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 2000);
+      }).catch(() => {
+        fallbackCopy(text, id);
+      });
+    } else {
+      fallbackCopy(text, id);
+    }
+  };
+  const fallbackCopy = (text, id) => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      console.warn('Copy failed');
+    }
   };
 
   const exportMd = () => {
@@ -484,14 +595,14 @@ export default function App() {
     const md = messages.map(m => `### ${m.vai_tro === 'user' ? '👤 Bạn' : '🤖 Rexi'}\n${m.noi_dung}`).join('\n\n---\n\n');
     const a = Object.assign(document.createElement('a'), {
       href: URL.createObjectURL(new Blob([`# ${title}\n\n${md}`], { type: 'text/markdown' })),
-      download: title.replace(/\s+/g, '_') + '.md'
+      download: title.replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, '_') + '.md'
     });
     a.click();
   };
 
   const handleOpenFile = async (fileRelPath) => {
     try {
-      const res = await fetch(`${API_BASE}/workspace/file-content?path=${encodeURIComponent(fileRelPath)}`);
+      const res = await apiFetch(`${API_BASE}/workspace/file-content?path=${encodeURIComponent(fileRelPath)}`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setSelectedFile(fileRelPath);
@@ -505,9 +616,9 @@ export default function App() {
     if (!selectedFile) return;
     setSavingFile(true);
     try {
-      await fetch(`${API_BASE}/workspace/file-content`, {
+      await apiFetch(`${API_BASE}/workspace/file-content`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: selectedFile, content: fileContent })
       });
       alert('Đã lưu tệp tin thành công!');
@@ -518,10 +629,10 @@ export default function App() {
   const handleExecCommand = async () => {
     if (!execCommand.trim()) return;
     try {
-      const res = await fetch(`${API_BASE}/chat/exec`, {
+      const res = await apiFetch(`${API_BASE}/chat/exec`, {
         method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ command: execCommand, 'X-Exec-Confirm': 'yes' })
+        headers: { ...authHeaders(), 'X-Exec-Confirm': 'yes' },
+        body: JSON.stringify({ command: execCommand })
       });
       const data = await res.json();
       setExecOutput(data.stdout || data.stderr || data.error || 'Thực thi thành công.');
@@ -531,13 +642,19 @@ export default function App() {
   const handleAddMemory = async () => {
     if (!newMemory.trim()) return;
     try {
-      await fetch(`${API_BASE}/chat/memory`, {
+      await apiFetch(`${API_BASE}/chat/memory`, {
         method: 'POST',
-        headers: authHeaders(),
         body: JSON.stringify({ loai: 'thong_tin_user', noi_dung: newMemory })
       });
       setNewMemory('');
       fetchMemories();
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteMemory = async (memId) => {
+    try {
+      await apiFetch(`${API_BASE}/chat/memory/${memId}`, { method: 'DELETE' });
+      setMemories(prev => prev.filter(m => m.ma_bo_nho !== memId));
     } catch (e) { console.error(e); }
   };
 
@@ -548,7 +665,7 @@ export default function App() {
         ? { email: authEmail, password: authPassword }
         : { email: authEmail, password: authPassword, ten_day_du: authFullName };
 
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -570,12 +687,16 @@ export default function App() {
         alert(data.error || 'Đăng nhập thất bại');
       }
     } catch (e) {
-      // Fallback: offline mode
-      const u = { ma_nguoi_dung: 'u1111111-1111-1111-1111-111111111111', email: authEmail || 'user@rexi.ai', ten_day_du: authFullName || authEmail.split('@')[0] || 'Rexi Admin User' };
-      setCurrentUser(u);
-      localStorage.setItem('rexi_user', JSON.stringify(u));
-      setAuthModalOpen(false);
+      console.error('[Auth] Login failed:', e);
+      alert('Không thể kết nối đến máy chủ. Vui lòng kiểm tra mạng hoặc khởi động lại server AI Rexi.');
     }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('rexi_token');
+    localStorage.removeItem('rexi_user');
+    setAuthToken('');
+    setCurrentUser(null);
   };
 
   const renderTree = (nodes) => nodes.map(node => (
@@ -606,197 +727,53 @@ export default function App() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--bg-main)] text-[var(--text-main)] font-sans antialiased">
       
+
       {/* ═══════════════════ SIDEBAR NAVIGATION ═══════════════════ */}
-      <aside className={`
-        fixed inset-y-0 left-0 z-40 flex flex-col bg-[var(--bg-sidebar)] border-r border-white/5 transition-all duration-300
-        ${sidebarOpen ? 'w-72' : 'w-0 overflow-hidden'}
-        md:relative md:shrink-0
-      `}>
-        {/* Header Branding */}
-        <div className="flex items-center justify-between p-4 border-b border-white/5">
-          <div className="flex items-center gap-3">
-            <RexiLogo />
-            <div>
-              <h1 className="font-bold text-base bg-gradient-to-r from-cyan-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">
-                AI REXI OS
-              </h1>
-              <span className="text-[10px] text-cyan-400/80 tracking-widest uppercase font-medium">Master Suite v2.0</span>
-            </div>
-          </div>
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-          >
-            <Menu size={18} />
-          </button>
-        </div>
-
-        {/* Action Button: New Conversation */}
-        <div className="p-3">
-          <button
-            onClick={handleNewConversation}
-            className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm shadow-lg shadow-cyan-500/20 transition-all active:scale-95"
-          >
-            <Plus size={18} />
-            <span>Cuộc Trò Chuyện Mới</span>
-          </button>
-        </div>
-
-        {/* Workspace Tab Switcher */}
-        <div className="grid grid-cols-5 gap-1 p-1.5 mx-3 bg-[#131417] rounded-xl border border-white/5 text-[11px] font-medium">
-          <button
-            onClick={() => setActiveTab('chat')}
-            className={`py-1.5 rounded-lg flex flex-col items-center gap-0.5 transition-all ${activeTab === 'chat' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}
-          >
-            <MessageSquare size={13} /> Chat
-          </button>
-          <button
-            onClick={() => setActiveTab('code')}
-            className={`py-1.5 rounded-lg flex flex-col items-center gap-0.5 transition-all ${activeTab === 'code' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}
-          >
-            <Code size={13} /> Code
-          </button>
-          <button
-            onClick={() => setActiveTab('files')}
-            className={`py-1.5 rounded-lg flex flex-col items-center gap-0.5 transition-all ${activeTab === 'files' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}
-          >
-            <Folder size={13} /> Files
-          </button>
-          <button
-            onClick={() => setActiveTab('iptv')}
-            className={`py-1.5 rounded-lg flex flex-col items-center gap-0.5 transition-all ${activeTab === 'iptv' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}
-          >
-            <Tv size={13} /> TV
-          </button>
-          <button
-            onClick={() => setActiveTab('desktop')}
-            className={`py-1.5 rounded-lg flex flex-col items-center gap-0.5 transition-all ${activeTab === 'desktop' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}
-          >
-            <Monitor size={13} /> Remote
-          </button>
-        </div>
-
-        {/* Super Modals Triggers */}
-        <div className="grid grid-cols-2 gap-2 px-3 mt-2">
-          <button
-            onClick={() => setSkillsOpen(true)}
-            className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-purple-900/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-medium transition-all"
-          >
-            <Layers size={14} /> 35+ Skills
-          </button>
-          <button
-            onClick={() => setSuperToolsOpen(true)}
-            className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-amber-900/30 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-medium transition-all"
-          >
-            <Zap size={14} /> Super Tools
-          </button>
-        </div>
-
-        {/* Search Input */}
-        <div className="px-3 my-2">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#131417] border border-white/5">
-            <Search size={14} className="text-slate-500 shrink-0" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Tìm hội thoại..."
-              className="w-full bg-transparent text-xs text-slate-200 placeholder-slate-500 outline-none"
-            />
-          </div>
-        </div>
-
-        {/* Conversation List */}
-        <div className="flex-1 overflow-y-auto px-2 space-y-1">
-          {filteredConvs.map(conv => (
-            <div
-              key={conv.ma_hoi_thoai}
-              onClick={() => { setActiveConvId(conv.ma_hoi_thoai); setActiveTab('chat'); }}
-              className={`group flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition-all border ${
-                activeConvId === conv.ma_hoi_thoai
-                  ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300'
-                  : 'border-transparent hover:bg-white/5 text-slate-300'
-              }`}
-            >
-              <div className="flex items-center gap-2.5 truncate">
-                <MessageSquare size={14} className={activeConvId === conv.ma_hoi_thoai ? "text-cyan-400" : "text-slate-500"} />
-                <span className="text-xs truncate font-medium">{conv.tieu_de || 'Trò chuyện mới'}</span>
-              </div>
-              <button
-                onClick={(e) => handleDeleteConversation(conv.ma_hoi_thoai, e)}
-                className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-white/10 text-slate-500 hover:text-rose-400 transition-all"
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {/* Collapsible Workspace Files Drawer in Sidebar */}
-        <div className="px-2 border-t border-white/5 pt-2">
-          <button
-            onClick={() => setFilesDrawerOpen(!filesDrawerOpen)}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-          >
-            <span className="flex items-center gap-2"><FolderOpen size={15} /> Files Dự Án (D:\AI REXI)</span>
-            <ChevronDown size={13} className={`transition-transform ${filesDrawerOpen ? 'rotate-180' : ''}`} />
-          </button>
-          {filesDrawerOpen && (
-            <div className="mt-1 max-h-40 overflow-y-auto px-1 pb-2 font-mono text-xs">
-              {renderTree(fileTree)}
-            </div>
-          )}
-        </div>
-
-        {/* Bottom User Profile Bar */}
-        <div className="p-3 border-t border-white/5 flex items-center justify-between bg-[#131417]">
-          {currentUser ? (
-            <div
-              onClick={() => setAuthModalOpen(true)}
-              className="flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity"
-            >
-              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white shadow-md">
-                {currentUser.ten_day_du ? currentUser.ten_day_du[0].toUpperCase() : 'U'}
-              </div>
-              <div className="truncate max-w-[110px]">
-                <p className="text-xs font-semibold text-white truncate">{currentUser.ten_day_du}</p>
-                <p className="text-[10px] text-emerald-400 font-medium">● Connected</p>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => setAuthModalOpen(true)}
-              className="flex items-center gap-2"
-            >
-              <div className="w-7 h-7 rounded-full border border-white/20 flex items-center justify-center">
-                <User size={14} className="text-white/70" />
-              </div>
-              <span className="text-xs font-medium text-white/70">Đăng nhập</span>
-            </button>
-          )}
-
-          <div className="flex items-center gap-1">
-            <a
-              href="/admin"
-              className="p-1.5 rounded-lg hover:bg-white/10 text-amber-400 transition-colors"
-              title="Admin Control Panel"
-            >
-              <Shield size={16} />
-            </a>
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-              title="Cài đặt hệ thống"
-            >
-              <Settings size={16} />
-            </button>
-          </div>
-        </div>
-      </aside>
+      <Sidebar
+        sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen}
+        activeTab={activeTab} setActiveTab={setActiveTab}
+        conversations={conversations} filteredConvs={filteredConvs}
+        searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+        activeConvId={activeConvId} setActiveConvId={setActiveConvId}
+        handleNewConversation={handleNewConversation}
+        handleDeleteConversation={handleDeleteConversation}
+        filesDrawerOpen={filesDrawerOpen} setFilesDrawerOpen={setFilesDrawerOpen}
+        renderTree={renderTree} fileTree={fileTree}
+        setSkillsOpen={setSkillsOpen} setSuperToolsOpen={setSuperToolsOpen}
+        currentUser={currentUser} setCurrentUser={setCurrentUser} setAuthToken={setAuthToken}
+        setAuthModalOpen={setAuthModalOpen} setSettingsOpen={setSettingsOpen}
+      />
 
       {/* ═══════════════════ MAIN WORKSPACE AREA ═══════════════════ */}
       <main className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--bg-main)]">
         
+        {/* Guest Mode Banner */}
+        {!currentUser && (
+          <div className="bg-gradient-to-r from-amber-900/40 via-amber-800/30 to-amber-900/40 border-b border-amber-500/20 px-4 py-2 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1.5 text-xs text-amber-200/80">
+                <span className="text-amber-400">👤</span>
+                <span className="font-semibold text-amber-300">Chế độ Khách</span>
+              </span>
+              <span className="flex items-center gap-1.5 text-[11px]">
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">{guestLimits.messages.remaining}</span>
+                <span className="text-amber-200/60">/ {guestLimits.messages.limit} tin nhắn</span>
+              </span>
+              <span className="flex items-center gap-1.5 text-[11px]">
+                <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold">{guestLimits.agentTasks.remaining}</span>
+                <span className="text-amber-200/60">/ {guestLimits.agentTasks.limit} Agent tasks</span>
+              </span>
+            </div>
+            <button 
+              onClick={() => setAuthModalOpen(true)}
+              className="text-[11px] font-semibold px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 transition-all"
+            >
+              Đăng nhập →
+
+            </button>
+          </div>
+        )}
+
         {/* Top Header Bar */}
         <header className="h-14 px-4 border-b border-white/5 flex items-center justify-between bg-[var(--bg-sidebar)] backdrop-blur-md">
           <div className="flex items-center gap-3">
@@ -880,427 +857,20 @@ export default function App() {
           
           {/* TAB 1: AI CHAT WORKSPACE */}
           {activeTab === 'chat' && (
-            <div className="flex flex-col h-full max-w-4xl mx-auto px-4 py-3">
-
-              {/* Chat Messages Stream */}
-              <div ref={chatScrollRef} className="flex-1 overflow-y-auto space-y-4 pr-1 mt-2">
-                {messages.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-6">
-                    <RexiLogo className="w-16 h-16" />
-                    <div>
-                      <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">
-                        Chào {currentUser?.ten_day_du || 'bạn'}! Tôi là AI Rexi Master.
-                      </h2>
-                      <p className="text-xs text-slate-400 mt-2">Hệ thống trợ lý AI tích hợp 35+ Skills Agent, Giọng đọc Tiếng Việt, Office CLI, WiFi Health & IPTV Hub</p>
-                    </div>
-
-                    {/* Quick Chips */}
-                    <div className="flex items-center gap-2 flex-wrap justify-center">
-                      {QUICK_CHIPS.map(chip => (
-                        <button
-                          key={chip.id}
-                          onClick={() => setInputText(chip.prompt)}
-                          className="px-4 py-2 rounded-full bg-[#181920] border border-white/10 hover:border-cyan-500/40 text-slate-300 hover:text-cyan-300 text-xs font-medium transition-all"
-                        >
-                          {chip.name}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 w-full max-w-lg">
-                      {SUGGESTION_PROMPTS.map((item, idx) => (
-                        <button
-                          key={idx}
-                          onClick={() => handleSendMessage(item.title)}
-                          className="flex items-start gap-3 p-3.5 rounded-2xl bg-[#1e1f20] hover:bg-[#282a2c] border border-white/5 hover:border-cyan-500/30 text-left transition-all group"
-                        >
-                          <div className="p-2 rounded-xl bg-white/5 group-hover:scale-110 transition-transform">
-                            {item.icon}
-                          </div>
-                          <div>
-                            <p className="text-xs font-semibold text-slate-200 group-hover:text-cyan-300">{item.title}</p>
-                            <p className="text-[11px] text-slate-400 mt-0.5">{item.desc}</p>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  messages.map((msg, idx) => (
-                    <div
-                      key={msg.ma_tin_nhan || idx}
-                      className={`flex gap-3 text-sm ${msg.vai_tro === 'user' ? 'justify-end' : 'justify-start'}`}
-                    >
-                      {msg.vai_tro !== 'user' && (
-                        <RexiLogo className="w-7 h-7 shrink-0 mt-0.5" />
-                      )}
-
-                      <div className={`relative max-w-[85%] rounded-2xl p-4 shadow-sm ${
-                        msg.vai_tro === 'user'
-                          ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-tr-none'
-                          : 'bg-[#1e1f20] border border-white/5 text-slate-200 rounded-tl-none prose-rexi'
-                      }`}>
-                        {msg.vai_tro === 'user' ? (
-                          <p className="whitespace-pre-wrap">{msg.noi_dung}</p>
-                        ) : (
-                          <div dangerouslySetInnerHTML={{ __html: marked.parse(msg.noi_dung || '') }} />
-                        )}
-
-                        {msg.vai_tro !== 'user' && (
-                          <div className="flex items-center justify-end gap-3 mt-3 pt-2 border-t border-white/5 text-xs text-slate-400">
-                            <button
-                              onClick={() => speakText(msg.noi_dung, msg.ma_tin_nhan)}
-                              className={`flex items-center gap-1 transition-colors ${speakingMsgId === msg.ma_tin_nhan ? "text-amber-400 animate-pulse" : "hover:text-cyan-400"}`}
-                              title="Đọc bằng giọng nói Tiếng Việt"
-                            >
-                              <Volume2 size={13} />
-                              <span>{speakingMsgId === msg.ma_tin_nhan ? 'Đang đọc...' : 'Đọc giọng nói'}</span>
-                            </button>
-
-                            <button
-                              onClick={() => copyToClipboard(msg.noi_dung, msg.ma_tin_nhan)}
-                              className="flex items-center gap-1 hover:text-cyan-400 transition-colors"
-                            >
-                              {copiedId === msg.ma_tin_nhan ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
-                              <span>{copiedId === msg.ma_tin_nhan ? 'Đã chép' : 'Sao chép'}</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      {msg.vai_tro === 'user' && (
-                        <div className="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-white shrink-0 mt-0.5">
-                          U
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
-
-                {loading && (
-                  <div className="flex gap-3 items-center text-slate-400 text-xs">
-                    <RexiLogo className="w-7 h-7" />
-                    <div className="flex items-center gap-1.5 bg-[#1e1f20] px-4 py-2.5 rounded-full border border-white/5">
-                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce"></span>
-                      <span className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce [animation-delay:0.2s]"></span>
-                      <span className="w-2 h-2 rounded-full bg-purple-400 animate-bounce [animation-delay:0.4s]"></span>
-                      <span className="ml-2 font-medium">Rexi đang phân tích & thực thi tác vụ Agent...</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Attachment Preview Bar */}
-              {attachedFiles.length > 0 && (
-                <div className="flex items-center gap-2 p-2 bg-[#181920] border border-white/10 rounded-xl mb-2">
-                  {attachedFiles.map((f, i) => (
-                    <span key={i} className="text-xs bg-white/10 text-cyan-300 px-2 py-1 rounded-md flex items-center gap-1">
-                      <Paperclip size={12} /> {f.name}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* Chat Input */}
-              <div className="mt-3 relative">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileSelect}
-                  multiple
-                  className="hidden"
-                />
-
-                <div className="flex items-center bg-[#181920] border border-white/10 focus-within:border-cyan-500/50 rounded-2xl px-4 py-2.5 shadow-xl transition-all">
-                  {/* Chat Mode Custom Dropdown */}
-                  <div className="relative mr-2">
-                    <button
-                      onClick={() => setChatModeOpen(!chatModeOpen)}
-                      className="flex items-center gap-1.5 bg-[#131417] text-[11px] font-medium text-cyan-300 border border-cyan-500/30 rounded-lg px-2 py-1.5 cursor-pointer hover:bg-[#1a1b20] transition-colors w-[110px] justify-between whitespace-nowrap overflow-hidden"
-                    >
-                      {executionMode === 'agent' ? '⚡ Agent Mode' : '💬 Chat AI'}
-                      <ChevronDown size={12} className={`transition-transform ${chatModeOpen ? 'rotate-180' : ''}`} />
-                    </button>
-                    {chatModeOpen && (
-                      <div className="absolute bottom-full left-0 mb-2 bg-[#1a1b24] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 min-w-[200px]">
-                        <button
-                          onClick={() => { setExecutionMode('chat'); setChatModeOpen(false); }}
-                          className={`w-full flex items-start gap-3 px-3 py-2.5 hover:bg-white/5 transition-colors text-left ${
-                            executionMode !== 'agent' ? 'bg-cyan-500/10' : ''
-                          }`}
-                        >
-                          <MessageSquare size={16} className={executionMode !== 'agent' ? 'text-cyan-400 mt-0.5' : 'text-slate-400 mt-0.5'} />
-                          <div>
-                            <p className={`text-xs font-bold ${executionMode !== 'agent' ? 'text-cyan-300' : 'text-slate-200'}`}>Chat AI</p>
-                            <p className="text-[10px] text-slate-500 mt-0.5">Trò chuyện AI thông thường</p>
-                          </div>
-                        </button>
-                        <button
-                          onClick={() => { setExecutionMode('agent'); setChatModeOpen(false); }}
-                          className={`w-full flex items-start gap-3 px-3 py-2.5 hover:bg-white/5 transition-colors text-left ${
-                            executionMode === 'agent' ? 'bg-purple-500/10' : ''
-                          }`}
-                        >
-                          <Zap size={16} className={executionMode === 'agent' ? 'text-purple-400 mt-0.5' : 'text-slate-400 mt-0.5'} />
-                          <div>
-                            <p className={`text-xs font-bold ${executionMode === 'agent' ? 'text-purple-300' : 'text-slate-200'}`}>Agent Mode</p>
-                            <p className="text-[10px] text-slate-500 mt-0.5">Tự động thực thi code & tác vụ</p>
-                          </div>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-2 text-slate-400 hover:text-cyan-400 transition-colors"
-                    title="Đính kèm file/ảnh"
-                  >
-                    <Paperclip size={16} />
-                  </button>
-
-                  <button
-                    onClick={startVoice}
-                    className={`p-2 transition-colors ${listening ? "text-rose-400 animate-pulse" : "text-slate-400 hover:text-cyan-400"}`}
-                    title="Nhập bằng giọng nói"
-                  >
-                    <Mic size={16} />
-                  </button>
-
-                  <textarea
-                    ref={textareaRef}
-                    value={inputText}
-                    onChange={e => setInputText(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                    placeholder="Hỏi AI Rexi bất cứ điều gì... (Enter để gửi)"
-                    rows={1}
-                    className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-500 outline-none resize-none max-h-32 px-2"
-                  />
-
-                  <button
-                    onClick={() => handleSendMessage()}
-                    disabled={(!inputText.trim() && attachedFiles.length === 0) || loading}
-                    className="ml-2 p-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 text-white shadow-md transition-all shrink-0"
-                  >
-                    <Send size={16} />
-                  </button>
-                </div>
-              </div>
-
-            </div>
-          )}
-
-          {/* TAB 2: CODE & CANVAS EDITOR */}
-          {activeTab === 'code' && (
-            <div className="flex h-full w-full">
-              <div className="w-1/2 h-full border-r border-white/5 flex flex-col bg-[#131417]">
-                <div className="p-3 border-b border-white/5 flex items-center justify-between bg-[#181920]">
-                  <span className="text-xs font-mono text-cyan-400 font-semibold">{selectedFile || 'Workspace Code Editor'}</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setLiveHtml(fileContent)}
-                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium flex items-center gap-1"
-                    >
-                      <Play size={12} /> Chạy Preview
-                    </button>
-                    {selectedFile && (
-                      <button
-                        onClick={handleSaveFile}
-                        disabled={savingFile}
-                        className="px-3 py-1 bg-cyan-500 hover:bg-cyan-400 text-white rounded-lg text-xs font-medium flex items-center gap-1"
-                      >
-                        <Save size={12} /> {savingFile ? 'Đang lưu...' : 'Lưu File'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <textarea
-                  value={fileContent}
-                  onChange={e => { setFileContent(e.target.value); }}
-                  placeholder="Chọn file từ tab Files, hoặc nhập HTML/CSS để preview trực tiếp bên phải..."
-                  className="flex-1 p-4 bg-[#0d0e11] font-mono text-xs text-slate-200 outline-none resize-none"
-                />
-              </div>
-
-              <div className="w-1/2 h-full flex flex-col bg-[#1e1f20]">
-                <div className="p-3 border-b border-white/5 flex items-center justify-between bg-[#181920]">
-                  <span className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
-                    <Eye size={14} className="text-cyan-400" /> Live HTML/CSS Preview
-                  </span>
-                  <button onClick={() => setLiveHtml('')} className="text-[10px] text-slate-500 hover:text-rose-400">Xóa</button>
-                </div>
-                {liveHtml ? (
-                  <iframe
-                    srcDoc={liveHtml}
-                    className="flex-1 w-full border-none bg-white"
-                    title="Live Preview"
-                    sandbox="allow-scripts"
-                  />
-                ) : (
-                  <div className="flex-1 p-4 flex items-center justify-center text-slate-400 text-xs">
-                    <div className="text-center space-y-2">
-                      <Code size={36} className="mx-auto text-cyan-400/60" />
-                      <p className="font-medium text-slate-300">Live Canvas Sẵn Sàng</p>
-                      <p className="text-[11px] text-slate-500">Nhập HTML/CSS ở bên trái rồi bấm <span className="text-emerald-400 font-bold">▶ Chạy Preview</span></p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: WORKSPACE FILES TREE */}
-          {activeTab === 'files' && (
-            <div className="p-6 max-w-4xl mx-auto space-y-4">
-              <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Folder className="text-cyan-400" size={18} /> Thư Mục Dự Án Workspace (D:\AI REXI)
-                </h3>
-                <button onClick={fetchFileTree} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400">
-                  <RefreshCw size={14} />
-                </button>
-              </div>
-
-              <div className="bg-[#181920] border border-white/5 rounded-2xl p-4 space-y-2 font-mono text-xs">
-                {renderTree(fileTree)}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: IPTV ENTERTAINMENT HUB */}
-          {activeTab === 'iptv' && (
-            <div className="flex h-full w-full">
-              <div className="w-72 h-full border-r border-white/5 bg-[#181920] flex flex-col shrink-0">
-                <div className="p-3 border-b border-white/5 space-y-2">
-                  <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <Tv size={16} className="text-rose-400" /> Kênh IPTV ({iptvChannels.length})
-                  </h3>
-                  {/* Tab Thể Loại / Quốc Gia */}
-                  <div className="flex gap-1 bg-[#131417] rounded-xl p-1">
-                    <button
-                      onClick={() => { setIptvTab('category'); fetchIPTV(iptvCategory); }}
-                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all ${iptvTab === 'category' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'text-slate-400 hover:text-white'}`}
-                    >
-                      <Tv size={11} className="inline mr-1" />Thể Loại
-                    </button>
-                    <button
-                      onClick={() => { setIptvTab('country'); fetchIPTV(null, iptvCountry); }}
-                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all ${iptvTab === 'country' ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'text-slate-400 hover:text-white'}`}
-                    >
-                      <Globe size={11} className="inline mr-1" />Quốc Gia ({iptvChannels.length})
-                    </button>
-                  </div>
-                  {iptvTab === 'category' ? (
-                    <select
-                      value={iptvCategory}
-                      onChange={e => { setIptvCategory(e.target.value); fetchIPTV(e.target.value); }}
-                      className="w-full bg-[#131417] text-xs text-slate-300 border border-white/10 rounded-xl p-2 outline-none"
-                    >
-                      <option value="news">📰 Tin Tức 24/7</option>
-                      <option value="animation">🦄 Hoạt Hình / Anime</option>
-                      <option value="movies">🍿 Phim Điện Ảnh</option>
-                      <option value="sports">⚽ Thể Thao Live</option>
-                      <option value="entertainment">🎭 Giải Trí</option>
-                      <option value="music">🎵 Âm Nhạc</option>
-                    </select>
-                  ) : (
-                    <select
-                      value={iptvCountry}
-                      onChange={e => { setIptvCountry(e.target.value); fetchIPTV(null, e.target.value); }}
-                      className="w-full bg-[#131417] text-xs text-slate-300 border border-white/10 rounded-xl p-2 outline-none"
-                    >
-                      <option value="VN">🇻🇳 Việt Nam</option>
-                      <option value="US">🇺🇸 United States</option>
-                      <option value="GB">🇬🇧 United Kingdom</option>
-                      <option value="KR">🇰🇷 South Korea</option>
-                      <option value="JP">🇯🇵 Japan</option>
-                      <option value="CN">🇨🇳 China</option>
-                      <option value="TH">🇹🇭 Thailand</option>
-                      <option value="FR">🇫🇷 France</option>
-                      <option value="DE">🇩🇪 Germany</option>
-                      <option value="IN">🇮🇳 India</option>
-                    </select>
-                  )}
-                  <input
-                    type="text"
-                    value={iptvSearch}
-                    onChange={e => setIptvSearch(e.target.value)}
-                    placeholder="🔍 Tìm kênh..."
-                    className="w-full bg-[#131417] text-xs text-slate-300 border border-white/10 rounded-xl px-3 py-1.5 outline-none"
-                  />
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-                  {iptvChannels
-                    .filter(ch => ch.name.toLowerCase().includes(iptvSearch.toLowerCase()))
-                    .map((ch, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setSelectedChannel(ch)}
-                      className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl text-left text-xs transition-all ${
-                        selectedChannel?.url === ch.url ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 font-medium' : 'text-slate-300 hover:bg-white/5'
-                      }`}
-                    >
-                      {ch.logo ? (
-                        <img src={ch.logo} alt="" className="w-6 h-6 rounded object-contain shrink-0 bg-white/5" onError={e => { e.target.style.display='none'; }} />
-                      ) : (
-                        <Play size={12} className={selectedChannel?.url === ch.url ? "text-rose-400 fill-rose-400 shrink-0" : "text-slate-500 shrink-0"} />
-                      )}
-                      <span className="truncate flex-1">{ch.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex-1 h-full bg-black flex flex-col">
-                {selectedChannel && (
-                  <div className="px-3 py-2 bg-[#181920] border-b border-white/5 flex items-center gap-2">
-                    <Radio size={13} className="text-rose-400 animate-pulse" />
-                    <span className="text-xs font-medium text-white truncate">{selectedChannel.name}</span>
-                    <span className="ml-auto text-[10px] text-slate-500 truncate max-w-[200px]">{selectedChannel.url}</span>
-                    {/* Nút Bật Phụ Đề AI */}
-                    <button
-                      onClick={() => setIptvSubtitleOn(!iptvSubtitleOn)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1 transition-all ${iptvSubtitleOn ? 'bg-rose-500 text-white' : 'bg-red-600 hover:bg-red-500 text-white'}`}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>
-                      Bật Phụ Đề AI
-                    </button>
-                  </div>
-                )}
-                <div className="flex-1 relative">
-                  {selectedChannel && !selectedChannel.url.includes('youtube') ? (
-                    <video
-                      ref={iptvVideoRef}
-                      className="w-full h-full object-contain bg-black"
-                      controls
-                      autoPlay
-                      playsInline
-                    />
-                  ) : selectedChannel?.url.includes('youtube') ? (
-                    <iframe
-                      src={`https://www.youtube.com/embed/${selectedChannel.url.split('v=')[1]?.split('&')[0] || 'dQw4w9WgXcQ'}?autoplay=1`}
-                      className="w-full h-full border-none"
-                      allowFullScreen
-                      allow="autoplay"
-                      title="YouTube Stream"
-                    />
-                  ) : (
-                    <div className="flex-1 h-full flex items-center justify-center text-slate-500 text-xs">
-                      <div className="text-center space-y-2">
-                        <Tv size={40} className="mx-auto text-slate-600" />
-                        <p>Chọn kênh để phát trực tiếp</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            <ChatTab
+              messages={messages} inputText={inputText} setInputText={setInputText}
+              loading={loading} attachedFiles={attachedFiles}
+              executionMode={executionMode} setExecutionMode={setExecutionMode}
+              chatModeOpen={chatModeOpen} setChatModeOpen={setChatModeOpen}
+              listening={listening} copiedId={copiedId} speakingMsgId={speakingMsgId}
+              handleSendMessage={handleSendMessage} startVoice={startVoice}
+              speakText={speakText} copyToClipboard={copyToClipboard}
+              fileInputRef={fileInputRef} handleFileSelect={handleFileSelect}
+              chatScrollRef={chatScrollRef} handleChatScroll={handleChatScroll}
+              showScrollTop={showScrollTop} showScrollBottom={showScrollBottom}
+              scrollToTopSmooth={scrollToTopSmooth} scrollToBottomSmooth={scrollToBottomSmooth}
+              currentUser={currentUser}
+            />
           )}
 
           {/* TAB 5: REMOTE DESKTOP CONTROL */}
@@ -1330,7 +900,7 @@ export default function App() {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const xPct = ((e.clientX - rect.left) / rect.width).toFixed(4);
                   const yPct = ((e.clientY - rect.top) / rect.height).toFixed(4);
-                  await fetch(`${API_BASE}/services/desktop/click`, {
+                  await apiFetch(`${API_BASE}/services/desktop/click`, {
                     method: 'POST', headers: authHeaders(),
                     body: JSON.stringify({ x_percent: parseFloat(xPct), y_percent: parseFloat(yPct) })
                   });
@@ -1340,6 +910,12 @@ export default function App() {
               >
                 {desktopScreenshot ? (
                   <img src={desktopScreenshot} alt="Desktop" className="max-h-full max-w-full object-contain" />
+                ) : desktopError ? (
+                  <div className="text-center space-y-2">
+                    <Monitor size={40} className="mx-auto text-red-500" />
+                    <p className="text-xs text-red-400">{desktopError}</p>
+                    <p className="text-[11px] text-slate-600">Nhấn "Cập Nhật Màn Hình" để thử lại</p>
+                  </div>
                 ) : (
                   <div className="text-center space-y-2">
                     <Monitor size={40} className="mx-auto text-slate-600" />
@@ -1355,44 +931,7 @@ export default function App() {
       </main>
 
       {/* ═══════════════════ SKILLS MODAL (DATABASE SKILLS) ═══════════════════ */}
-      {skillsOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#181920] border border-white/10 rounded-2xl w-full max-w-2xl p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/5 pb-3">
-              <div className="flex items-center gap-2">
-                <Layers className="text-purple-400" size={20} />
-                <h3 className="text-sm font-bold text-white">Quản Lý Gói Kỹ Năng Agent (Skills Manager)</h3>
-              </div>
-              <button onClick={() => setSkillsOpen(false)} className="text-slate-400 hover:text-white">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 max-h-96 overflow-y-auto pr-1">
-              {dbSkills.map(s => (
-                <div key={s.ma_ky_nang} className="p-3.5 rounded-xl bg-[#131417] border border-white/5 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-200">{s.tieu_de}</span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${s.trang_thai === 'kich_hoat' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
-                      {s.trang_thai === 'kich_hoat' ? 'Đang bật' : 'Tắt'}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">{s.mo_ta}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-2 border-t border-white/5 flex justify-end">
-              <button
-                onClick={() => setSkillsOpen(false)}
-                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-medium text-xs shadow-md transition-all"
-              >
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SkillsModal skillsOpen={skillsOpen} setSkillsOpen={setSkillsOpen} dbSkills={dbSkills} />
 
       {/* ═══════════════════ SUPER TOOLS MODAL (EXEC, GIT, MEMORY) ═══════════════════ */}
       {superToolsOpen && (
@@ -1483,7 +1022,7 @@ export default function App() {
                       <span className="flex-1 text-slate-300">{m.noi_dung}</span>
                       <button
                         onClick={async () => {
-                          await fetch(`${API_BASE}/chat/memory/${m.ma_bo_nho}`, { method: 'DELETE', headers: authHeaders() });
+                          await apiFetch(`${API_BASE}/chat/memory/${m.ma_bo_nho}`, { method: 'DELETE', headers: authHeaders() });
                           fetchMemories();
                         }}
                         className="opacity-0 group-hover:opacity-100 text-rose-400 hover:text-rose-300 shrink-0"
@@ -1507,12 +1046,72 @@ export default function App() {
       {authModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-[#181920] border border-white/10 rounded-2xl w-full max-w-sm p-6 shadow-2xl relative">
-            <button onClick={() => setAuthModalOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+            <button onClick={() => { setAuthModalOpen(false); setForgotStep('login'); setShowPassword(false); setShowForgotNewPassword(false); setForgotMessage(''); }} className="absolute top-4 right-4 text-slate-400 hover:text-white">
               <X size={18} />
             </button>
 
+            {forgotStep === 'request' ? (
+              <div className="space-y-3">
+                <h3 className="text-sm font-bold text-white text-center">Quên Mật Khẩu</h3>
+                <p className="text-xs text-slate-400 text-center">Nhập tài khoản để nhận mã OTP đặt lại mật khẩu.</p>
+                <input type="text" value={authEmail} onChange={e => setAuthEmail(e.target.value)}
+                  placeholder="Nhập tài khoản" className="w-full px-3 py-2.5 bg-[#131417] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
+                {forgotMessage && <p className="text-xs text-cyan-300 text-center">{forgotMessage}</p>}
+                <button type="button" onClick={async () => {
+                  try {
+                    const res = await apiFetch(`${API_BASE}/auth/forgot-password`, {
+                      method: 'POST', headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({ account: authEmail })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      setForgotMessage(data.otp_debug ? `Mã OTP local: ${data.otp_debug}` : data.message);
+                      setForgotStep('reset');
+                    } else {
+                      setForgotMessage(data.error || 'Không thể tạo mã OTP.');
+                    }
+                  } catch { setForgotMessage('Lỗi kết nối server.'); }
+                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95">Gửi OTP</button>
+                <button type="button" onClick={() => { setForgotStep('login'); setForgotMessage(''); }} className="w-full text-xs text-slate-500 hover:text-white transition-colors">Quay lại Đăng Nhập</button>
+              </div>
+            ) : forgotStep === 'reset' ? (
+              <div className="space-y-3">
+                <h3 className="text-sm font-bold text-white text-center">Đặt Lại Mật Khẩu</h3>
+                {forgotMessage && <p className="text-xs text-cyan-300 text-center">{forgotMessage}</p>}
+                <input type="text" inputMode="numeric" value={forgotOtp} onChange={e => setForgotOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="Nhập OTP" className="w-full px-3 py-2.5 bg-[#131417] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
+                <div className="relative">
+                  <input type={showForgotNewPassword ? 'text' : 'password'} value={forgotNewPassword} onChange={e => setForgotNewPassword(e.target.value)}
+                    placeholder="Mật khẩu mới" className="w-full px-3 py-2.5 pr-10 bg-[#131417] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
+                  <button type="button" onClick={() => setShowForgotNewPassword(!showForgotNewPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white" aria-label={showForgotNewPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}>
+                    {showForgotNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                <button type="button" onClick={async () => {
+                  try {
+                    const res = await apiFetch(`${API_BASE}/auth/reset-password`, {
+                      method: 'POST', headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({ account: authEmail, otp_code: forgotOtp, new_password: forgotNewPassword })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      setForgotMessage('Đặt lại mật khẩu thành công. Bạn có thể đăng nhập.');
+                      setAuthPassword('');
+                      setForgotOtp('');
+                      setForgotNewPassword('');
+                      setTimeout(() => { setForgotStep('login'); setForgotMessage(''); setAuthMode('login'); }, 1200);
+                    } else {
+                      setForgotMessage(data.error || 'OTP không đúng.');
+                    }
+                  } catch { setForgotMessage('Lỗi kết nối server.'); }
+                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95">Đặt lại mật khẩu</button>
+                <button type="button" onClick={() => { setForgotStep('request'); setForgotMessage(''); }} className="w-full text-xs text-slate-500 hover:text-white transition-colors">Gửi lại OTP</button>
+              </div>
+            ) : (
+            <div>
+            <>
             <div className="flex flex-col items-center pt-2 pb-2">
-              <img src="/rexi_cat_icon.png" alt="Logo" className="w-12 h-12 object-contain" />
+              <img src="/rexi_cat_icon.png" alt="Logo" className="rexi-logo w-12 h-12 object-contain" />
               <span className="text-xs text-white/50 font-semibold tracking-widest mt-1">AI Rexi</span>
             </div>
 
@@ -1532,10 +1131,10 @@ export default function App() {
                 }`}
               >
                 Đăng Ký
-              </button>
+             </button>
             </div>
 
-            <div className="space-y-3 text-xs">
+            <form onSubmit={(e) => { e.preventDefault(); handleAuthSubmit(); }} className="space-y-3 text-xs">
               {authMode === 'register' && (
                 <div>
                   <label className="block text-slate-400 font-medium mb-1">Họ và Tên</label>
@@ -1543,24 +1142,30 @@ export default function App() {
                 </div>
               )}
               <div>
-                <label className="block text-slate-400 font-medium mb-1">Email</label>
-                <input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="user@rexi.ai" className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none" />
+                <label className="block text-slate-400 font-medium mb-1">Tài Khoản</label>
+                <input type="text" required value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="Nhập tài khoản" className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none" />
               </div>
               <div>
                 <label className="block text-slate-400 font-medium mb-1">Mật Khẩu</label>
-                <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="••••••••" className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none" />
+                <div className="relative">
+                  <input type={showPassword ? 'text' : 'password'} required value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="••••••••" className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none pr-10" />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
-            </div>
 
-            <div className="flex justify-end mt-1">
-              <button className="text-[10px] text-slate-500 hover:text-cyan-400 transition-colors">
-                Quên Mật Khẩu?
+              <div className="flex justify-end mt-1">
+                <button type="button" onClick={() => { setForgotStep('request'); setForgotMessage(''); }} className="text-[10px] text-slate-500 hover:text-cyan-400 transition-colors">
+                  Quên Mật Khẩu?
+                </button>
+              </div>
+
+              <button type="submit" className="w-full py-3 mt-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs shadow-lg shadow-cyan-500/25 transition-all">
+                {authMode === 'login' ? 'Đăng Nhập' : 'Đăng Ký'}
               </button>
-            </div>
-
-            <button onClick={handleAuthSubmit} className="w-full py-3 mt-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs shadow-lg shadow-cyan-500/25 transition-all">
-              {authMode === 'login' ? 'Đăng Nhập' : 'Đăng Ký'}
-            </button>
+            </form>
 
             <div className="relative flex items-center my-4">
               <div className="flex-1 h-px bg-white/5"></div>
@@ -1568,18 +1173,22 @@ export default function App() {
               <div className="flex-1 h-px bg-white/5"></div>
             </div>
 
-            <button className="w-full py-2.5 rounded-xl bg-[#242530] hover:bg-[#2a2b38] text-white text-xs font-medium flex items-center justify-center gap-2 border border-white/5 transition-all">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-              </svg>
-              Đăng nhập với Google
-            </button>
+             <button type="button" className="w-full py-2.5 rounded-xl bg-[#242530] hover:bg-[#2a2b38] text-white text-xs font-medium flex items-center justify-center gap-2 border border-white/5 transition-all">
+               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                 <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                 <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+               </svg>
+               Đăng nhập với Google
+             </button>
+             </>
+             </div>
+             )}
           </div>
         </div>
       )}
+
 
       {/* ═══════════════════ SETTINGS MODAL ═══════════════════ */}
       {settingsOpen && (

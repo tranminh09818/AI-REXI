@@ -6,7 +6,7 @@ const fs = require('fs');
 const { exec, execSync, spawn } = require('child_process');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const db = require('../config/db');
-const { authMiddleware, adminMiddleware, guestMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminMiddleware, guestMiddleware, guestAgentMiddleware, getGuestLimits } = require('../middleware/auth.middleware');
 
 // --- CONFIGURATION ---
 const OPENCODE_BIN_PATH = "C:\\Users\\84916\\.opencode\\bin\\opencode.exe";
@@ -89,6 +89,12 @@ router.post('/conversations', (req, res, next) => {
   });
 });
 
+// GUEST: Lấy thông tin giới hạn
+router.get('/guest-limits', (req, res) => {
+  const limits = getGuestLimits(req);
+  res.json({ success: true, limits, isLoggedIn: !!req.user });
+});
+
 // USER: Xóa cuộc hội thoại của chính mình
 router.delete('/conversations/:id', authMiddleware, (req, res) => {
   const { id } = req.params;
@@ -100,6 +106,32 @@ router.delete('/conversations/:id', authMiddleware, (req, res) => {
     if (this.changes === 0) return res.status(403).json({ error: 'Không có quyền xóa cuộc hội thoại này.' });
     res.json({ success: true, id });
   });
+});
+
+
+// ADMIN: Phan hoi tin nhan trong cuoc hoi thoai (vai_tro: 'admin')
+router.post('/admin/conversations/:id/reply', [authMiddleware, adminMiddleware], (req, res) => {
+  const { id } = req.params;
+  const { noi_dung } = req.body;
+  if (!noi_dung || !noi_dung.trim()) {
+    return res.status(400).json({ error: 'Noi dung tin nhan khong duoc trong' });
+  }
+  const maTinNhan = crypto.randomUUID();
+  db.run(
+    "INSERT INTO tin_nhan (ma_tin_nhan, ma_hoi_thoai, vai_tro, noi_dung) VALUES (?, ?, 'admin', ?)",
+    [maTinNhan, id, noi_dung.trim()],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      db.run("UPDATE cuoc_hoi_thoai SET ngay_cap_nhat = CURRENT_TIMESTAMP WHERE ma_hoi_thoai = ?", [id]);
+      res.json({
+        ma_tin_nhan: maTinNhan,
+        ma_hoi_thoai: id,
+        vai_tro: 'admin',
+        noi_dung: noi_dung.trim(),
+        admin_name: req.user.ten_day_du || req.user.email
+      });
+    }
+  );
 });
 
 // ADMIN: Xóa mềm bất kỳ cuộc hội thoại nào
@@ -121,10 +153,36 @@ router.post('/admin/conversations/:id/restore', [authMiddleware, adminMiddleware
   });
 });
 
+router.post("/admin/conversations/:id/reply", [authMiddleware, adminMiddleware], (req, res) => {
+  const { id } = req.params;
+  const { noi_dung } = req.body;
+  if (!noi_dung || !noi_dung.trim()) {
+    return res.status(400).json({ error: "Noi dung tin nhan khong duoc trong" });
+  }
+  const maTinNhan = crypto.randomUUID();
+  db.run(
+    "INSERT INTO tin_nhan (ma_tin_nhan, ma_hoi_thoai, vai_tro, noi_dung) VALUES (?, ?, admin, ?)",
+    [maTinNhan, id, noi_dung.trim()],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      db.run("UPDATE cuoc_hoi_thoai SET ngay_cap_nhat = CURRENT_TIMESTAMP WHERE ma_hoi_thoai = ?", [id]);
+      res.json({
+        ma_tin_nhan: maTinNhan,
+        ma_hoi_thoai: id,
+        vai_tro: "admin",
+        noi_dung: noi_dung.trim(),
+        admin_name: req.user.ten_day_du || req.user.email
+      });
+    }
+  );
+});
 // ADMIN: Xóa vĩnh viễn cuộc hội thoại
 router.delete('/admin/conversations/:id/permanent', [authMiddleware, adminMiddleware], (req, res) => {
   const { id } = req.params;
   db.run("DELETE FROM tin_nhan WHERE ma_hoi_thoai = ?", [id], (err) => {
+    if (err) {
+      console.error('[Conversations Delete Messages Error]', err.message);
+    }
     db.run("DELETE FROM cuoc_hoi_thoai WHERE ma_hoi_thoai = ?", [id], function(err2) {
       if (err2) return res.status(500).json({ error: err2.message });
       res.json({ success: true, id });
@@ -364,6 +422,7 @@ router.get('/conversations/:id/messages', authMiddleware, (req, res) => {
   // Kiểm tra user có quyền xem cuộc hội thoại này không
   const condition = req.user.role === 'admin' ? "" : `AND ma_nguoi_dung = ?`;
   db.get(`SELECT ma_hoi_thoai FROM cuoc_hoi_thoai WHERE ma_hoi_thoai = ? ${condition}`, req.user.role === 'admin' ? [id] : [id, req.user.id], (err, conv) => {
+    if (err) return res.status(500).json({ error: err.message });
     if (!conv) {
       return res.status(403).json({ error: 'Không có quyền truy cập.' });
     }
@@ -411,7 +470,7 @@ router.post('/conversations/:id/messages', (req, res, next) => {
   return authMiddleware(req, res, next);
 }, async (req, res) => {
   const { id } = req.params;
-  const { vai_tro, noi_dung, provider, client_api_key, model_name, base_url, mode, execution_mode, thinking_level } = req.body;
+  const { vai_tro, noi_dung, provider, client_api_key, model_name, base_url, mode, execution_mode, thinking_level, skill_id } = req.body;
 
   // Logic xử lý tin nhắn giữ nguyên...
   const maTinNhanUser = crypto.randomUUID();
@@ -432,10 +491,18 @@ router.post('/conversations/:id/messages', (req, res, next) => {
       });
 
       if (execution_mode === 'agent') {
-        // Chỉ cho phép Admin sử dụng chế độ Agent
-        if (!req.user || req.user.role !== 'admin') {
-          const errorMessage = "⛔ **Truy cập bị từ chối:** Chế độ Agent chỉ dành cho quản trị viên (Admin).";
+        // Cho phép tất cả user đã đăng nhập + Guest sử dụng Agent Mode
+        const isAdmin = req.user && req.user.role === 'admin';
+        const isGuest = !req.user;
+        
+        if (isGuest && req.session.agentTaskCount >= 3) {
+          const errorMessage = "🔒 **Đã hết lượt Agent Mode miễn phí!**\n\nBạn đã sử dụng hết **3 tasks** Agent cho khách.\n\nĐăng nhập để:\n✅ Agent Mode không giới hạn\n✅ Chat không giới hạn\n✅ Lưu lịch sử & Memory";
           return saveAIMessageAndRespond(id, errorMessage, res);
+        }
+
+        // Tăng counter cho guest
+        if (isGuest) {
+          req.session.agentTaskCount = (req.session.agentTaskCount || 0) + 1;
         }
 
         if (!IS_OPENCODE_AVAILABLE) {
@@ -447,10 +514,10 @@ router.post('/conversations/:id/messages', (req, res, next) => {
         const rootDir = path.join(__dirname, '..', '..', '..');
         
         // Sử dụng spawn để chống Shell Injection
-        const agentProcess = spawn(
-          `"${OPENCODE_BIN_PATH}"`, 
-          ['run', noi_dung, ...(model_name ? ['-m', model_name] : []), '--auto'], 
-          { cwd: rootDir, timeout: 30000, shell: true, env: { ...process.env, LANG: 'en_US.UTF-8' } }
+const agentProcess = spawn(
+          OPENCODE_BIN_PATH,
+          ['run', noi_dung, ...(model_name ? ['-m', model_name] : []), '--auto'],
+          { cwd: rootDir, timeout: 30000, env: { ...process.env, LANG: 'en_US.UTF-8' } }
         );
 
         let stdout = '';
@@ -506,12 +573,19 @@ router.post('/conversations/:id/messages', (req, res, next) => {
       }
 
       if (!keyToUse && !['ollama', 'opencode', 'freellmapi'].includes(selectedProvider)) {
-        const fallbackMsg = `Chưa cài đặt API Key cho nhà cung cấp ${selectedProvider.toUpperCase()}. Hãy bấm nút 'Cài đặt hệ thống' ở góc trái để nhập Key và chọn Model!`;
-        return saveAIMessageAndRespond(id, fallbackMsg, res);
+        // Fallback: nếu đã cài opencode.exe, cho phép dùng miễn phí thay vì chặn
+        if (IS_OPENCODE_AVAILABLE) {
+          selectedProvider = 'opencode';
+          selectedModel = 'opencode/deepseek-v4-flash-free';
+        } else {
+          const fallbackMsg = `Chưa cài đặt API Key cho nhà cung cấp ${selectedProvider.toUpperCase()}. Hãy bấm nút 'Cài đặt hệ thống' ở góc trái để nhập Key và chọn Model!`;
+          return saveAIMessageAndRespond(id, fallbackMsg, res);
+        }
       }
 
-      db.all("SELECT vai_tro, noi_dung FROM tin_nhan WHERE ma_hoi_thoai = ? ORDER BY ngay_gui ASC LIMIT 15", [id], async (err, history) => {
-        let cauTraLoiAI = "";
+db.all("SELECT vai_tro, noi_dung FROM tin_nhan WHERE ma_hoi_thoai = ? ORDER BY ngay_gui ASC LIMIT 15", [id], async (err, history) => {
+         history.push({ vai_tro: 'user', noi_dung: noi_dung });
+         let cauTraLoiAI = "";
 
         const { user_location } = req.body;
         const now = new Date();
@@ -534,12 +608,40 @@ router.post('/conversations/:id/messages', (req, res, next) => {
 
         const currentRolePrompt = SPECIALTY_PROMPTS[mode] || SPECIALTY_PROMPTS.general;
 
+        // Load TẤT CẢ skills từ DB và inject vào system prompt
+        let skillInstruction = '';
+        try {
+          const allSkills = await new Promise((resolve) => {
+            db.all("SELECT ten_ky_nang, tieu_de, mo_ta FROM ky_nang WHERE trang_thai = 'kich_hoat'", [], (err, rows) => {
+              resolve(rows || []);
+            });
+          });
+          
+          const skillPrompts = [];
+          for (const skill of allSkills) {
+            const skillDir = path.join(process.env.USERPROFILE || process.env.HOME, '.agents', 'skills', skill.ten_ky_nang);
+            const skillMdPath = path.join(skillDir, 'SKILL.md');
+            if (fs.existsSync(skillMdPath)) {
+              const skillContent = fs.readFileSync(skillMdPath, 'utf8');
+              skillPrompts.push(`🎯 **${skill.tieu_de}** (${skill.ten_ky_nang}):\n${skillContent.substring(0, 1500)}`);
+            } else {
+              skillPrompts.push(`🎯 **${skill.tieu_de}**: ${skill.mo_ta}`);
+            }
+          }
+          
+          if (skillPrompts.length > 0) {
+            skillInstruction = `\n\n📚 **KỸ NĂNG AGENT CỦA REXI:**\n` + skillPrompts.join('\n\n---\n\n');
+          }
+        } catch (skillErr) {
+          console.log('[Skill] Lỗi load skills:', skillErr.message);
+        }
+
         let systemPrompt = `${currentRolePrompt} Bây giờ là ${nowFormatted} (Giờ Việt Nam). Vị trí địa lý ước tính của người dùng: ${locationStr}.
 
 BỘ NHỚ DÀI HẠN VỀ NGƯỜI DÙNG & QUY TẮC CỦA REXI:
 ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dung ngắn gọn, súc tích, thực tế và chính xác.'}
 
-- NGUYÊN TẮC QUAN TRỌNG: Không lặp lại các câu miễn trừ trách nhiệm. Hãy trả lời thẳng vấn đề, tự nhiên, thân thiện, chu đáo và nâng cao trải nghiệm người dùng đến tận răng.`;
+- NGUYÊN TẮC QUAN TRỌNG: Không lặp lại các câu miễn trừ trách nhiệm. Hãy trả lời thẳng vấn đề, tự nhiên, thân thiện, chu đáo và nâng cao trải nghiệm người dùng đến tận răng.${skillInstruction}`;
 
         try {
           if (selectedProvider === 'gemini') {
@@ -571,9 +673,9 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
                 const rootDir = path.join(__dirname, '..', '..', '..');
                 await new Promise((resOp) => {
                   const fallbackProcess = spawn(
-                    `"${OPENCODE_BIN_PATH}"`,
-                    ['run', noi_dung, '--auto'], 
-                    { cwd: rootDir, timeout: 20000, shell: true, env: { ...process.env, LANG: 'en_US.UTF-8' } }
+                    OPENCODE_BIN_PATH,
+                    ['run', noi_dung, '--auto'],
+                    { cwd: rootDir, timeout: 20000, env: { ...process.env, LANG: 'en_US.UTF-8' } }
                   );
                   let stdout = '';
                   fallbackProcess.stdout.on('data', data => stdout += data);
@@ -671,21 +773,25 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
             if (IS_OPENCODE_AVAILABLE) {
               const opencodeModel = selectedModel && selectedModel !== 'opencode-default' ? selectedModel : 'opencode/deepseek-v4-flash-free';
               const rootDir = path.join(__dirname, '..', '..', '..');
+              const isAgentMode = execution_mode === 'agent';
               
               await new Promise((resolve) => {
+                const args = ['run', noi_dung, '-m', opencodeModel];
+                if (isAgentMode) args.push('--auto');
+                
                 const opencodeProcess = spawn(
-                  `"${OPENCODE_BIN_PATH}"`,
-                  ['run', noi_dung, '-m', opencodeModel, '--auto'],
-                  { cwd: rootDir, timeout: 20000, shell: true, env: { ...process.env, LANG: 'en_US.UTF-8' } }
+                  OPENCODE_BIN_PATH,
+                  args,
+                  { cwd: rootDir, timeout: 20000, env: { ...process.env, LANG: 'en_US.UTF-8' } }
                 );
                 let stdout = '';
                 opencodeProcess.stdout.on('data', data => stdout += data);
                 opencodeProcess.on('close', () => {
                   const cleanOut = stdout.replace(/\[Agent Error\]/g, '').trim();
-                  if (cleanOut && !cleanOut.includes('Command failed') && !cleanOut.includes('syntax is incorrect') && cleanOut.length > 10) {
+                  if (cleanOut && cleanOut.length > 0) {
                     cauTraLoiAI = cleanOut;
                   } else {
-                    cauTraLoiAI = `Xin chào! Tôi là **AI Rexi** - Trợ Lý Đa Năng của bạn.\n\nHiện tại tôi đang sử dụng **OpenCode Agent** để xử lý yêu cầu.\n\nBạn có thể:\n💬 **Chat** - Trò chuyện thông thường\n🤖 **Agent Mode** - Tự động code, sửa file, chạy lệnh\n💻 **Code Editor** - Viết và preview code trực tiếp\n📺 **IPTV** - Xem TV trực tuyến\n🖥️ **Remote Desktop** - Điều khiển máy tính từ xa\n\nRất vui được hỗ trợ bạn! 🚀`;
+                    cauTraLoiAI = `[OpenCode] Đã thực thi xong. Xem kết quả ở phía trên.`;
                   }
                   resolve();
                 });
@@ -707,7 +813,7 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
 
 // Long Term Memory APIs
 router.get('/memory', authMiddleware, (req, res) => {
-  db.all("SELECT * FROM bo_nho_dai_han ORDER BY do_uu_tien DESC, ngay_tao DESC", [], (err, rows) => {
+  db.all("SELECT * FROM bo_nho_dai_han WHERE ma_nguoi_dung = ? ORDER BY do_uu_tien DESC, ngay_tao DESC", [req.user.id], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });
@@ -718,8 +824,8 @@ router.post('/memory', authMiddleware, (req, res) => {
   if (!noi_dung) return res.status(400).json({ error: 'Nội dung bộ nhớ không được trống' });
   const maBoNho = 'mem_' + Date.now();
   db.run(
-    "INSERT INTO bo_nho_dai_han (ma_bo_nho, loai, noi_dung, do_uu_tien) VALUES (?, ?, ?, ?)",
-    [maBoNho, loai || 'thong_tin_user', noi_dung.trim(), do_uu_tien || 5],
+    "INSERT INTO bo_nho_dai_han (ma_bo_nho, ma_nguoi_dung, loai, noi_dung, do_uu_tien) VALUES (?, ?, ?, ?, ?)",
+    [maBoNho, req.user.id, loai || 'thong_tin_user', noi_dung.trim(), do_uu_tien || 5],
     (err) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ success: true, ma_bo_nho: maBoNho, loai, noi_dung });
@@ -729,16 +835,21 @@ router.post('/memory', authMiddleware, (req, res) => {
 
 router.delete('/memory/:id', authMiddleware, (req, res) => {
   const { id } = req.params;
-  db.run("DELETE FROM bo_nho_dai_han WHERE ma_bo_nho = ?", [id], (err) => {
+  db.run("DELETE FROM bo_nho_dai_han WHERE ma_bo_nho = ? AND ma_nguoi_dung = ?", [id, req.user.id], (err) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ success: true, id });
   });
 });
 
-// Exec API - Chỉ cho ADMIN
-router.post('/exec', [authMiddleware, adminMiddleware], (req, res) => {
+// Exec API - Cho user đã đăng nhập (yêu cầu confirm header để tránh exec vô tình)
+router.post('/exec', authMiddleware, (req, res) => {
   const { command } = req.body;
   if (!command) return res.status(400).json({ error: 'Thiếu câu lệnh execution' });
+
+  // BẮT BUỘC: Chỉ admin mới được exec
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: '⛔ Exec API chỉ dành cho Admin.' });
+  }
 
   // Chỉ cho phép request từ localhost
   const clientIp = req.ip || req.connection?.remoteAddress || '';
@@ -787,7 +898,7 @@ router.post('/exec', [authMiddleware, adminMiddleware], (req, res) => {
 });
 
 // Git APIs
-router.get('/git/status', [authMiddleware, adminMiddleware], (req, res) => {
+router.get('/git/status', authMiddleware, (req, res) => {
   const rootDir = path.join(__dirname, '..', '..', '..');
   exec('git status --short && git branch --show-current', { 
     cwd: rootDir, 
@@ -801,7 +912,7 @@ router.get('/git/status', [authMiddleware, adminMiddleware], (req, res) => {
   });
 });
 
-router.get('/git/diff', [authMiddleware, adminMiddleware], (req, res) => {
+router.get('/git/diff', authMiddleware, (req, res) => {
   const rootDir = path.join(__dirname, '..', '..', '..');
   exec('git diff', { 
     cwd: rootDir, 

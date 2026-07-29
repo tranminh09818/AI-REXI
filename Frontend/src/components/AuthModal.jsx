@@ -1,0 +1,115 @@
+import React, { useState } from 'react';
+import { X, LogIn, UserPlus, Lock, Eye, EyeOff } from 'lucide-react';
+
+export default function AuthModal({
+  authModalOpen, setAuthModalOpen, authMode, setAuthMode,
+  authEmail, setAuthEmail, authPassword, setAuthPassword,
+  authFullName, setAuthFullName, handleAuthSubmit
+}) {
+  const [showPassword, setShowPassword] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [forgotStep, setForgotStep] = useState('email');
+  const [forgotMsg, setForgotMsg] = useState('');
+  if (!authModalOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => { setAuthModalOpen(false); setShowForgot(false); }}>
+      <div className="bg-[#1a1b24] border border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
+        {showForgot ? (
+          <>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Lock size={16} className="text-cyan-400" /> Quên Mật Khẩu
+              </h2>
+              <button onClick={() => setShowForgot(false)} className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"><X size={16} /></button>
+            </div>
+            {forgotStep === 'email' && (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-400">Nhập tài khoản email của bạn để nhận OTP đặt lại mật khẩu.</p>
+                <input type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
+                  placeholder="Nhập email" className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
+                {forgotMsg && <p className="text-xs text-emerald-400">{forgotMsg}</p>}
+                <button onClick={async () => {
+                  try {
+                    const res = await fetch('http://localhost:5000/api/auth/forgot-password', {
+                      method: 'POST', headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({ email: forgotEmail })
+                    });
+                    const data = await res.json();
+                    if (data.success) { setForgotMsg(data.otp_debug ? 'OTP đã được gửi! (debug: ' + data.otp_debug + ')' : 'Kiểm tra email để lấy OTP.'); setForgotStep('otp'); }
+                    else { setForgotMsg(data.error || 'Không tìm thấy tài khoản.'); }
+                  } catch { setForgotMsg('Lỗi kết nối server.'); }
+                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95">Gửi OTP</button>
+              </div>
+            )}
+            {forgotStep === 'otp' && (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-400">Nhập OTP và mật khẩu mới.</p>
+                <input type="text" value={otpCode} onChange={e => setOtpCode(e.target.value)}
+                  placeholder="Nhập OTP" className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
+                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                  placeholder="Mật khẩu mới" className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
+                <button onClick={async () => {
+                  try {
+                    const res = await fetch('http://localhost:5000/api/auth/reset-password', {
+                      method: 'POST', headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({ email: forgotEmail, otp_code: otpCode, new_password: newPassword })
+                    });
+                    const data = await res.json();
+                    if (data.success) { setForgotMsg('Đặt lại mật khẩu thành công! Đăng nhập lại.'); setTimeout(() => { setShowForgot(false); setAuthMode('login'); }, 1500); }
+                    else { setForgotMsg(data.error || 'OTP không đúng hoặc đã hết hạn.'); }
+                  } catch { setForgotMsg('Lỗi kết nối server.'); }
+                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95">Đặt lại mật khẩu</button>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                {authMode === 'login' ? <Lock size={16} className="text-cyan-400" /> : <UserPlus size={16} className="text-emerald-400" />}
+                {authMode === 'login' ? 'Đăng Nhập' : 'Tạo Tài Khoản'}
+              </h2>
+              <button onClick={() => setAuthModalOpen(false)} className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"><X size={16} /></button>
+            </div>
+            <div className="space-y-3">
+              {authMode === 'register' && (
+                <input type="text" value={authFullName} onChange={e => setAuthFullName(e.target.value)}
+                  placeholder="Họ và tên" className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
+              )}
+              <input type="text" value={authEmail} onChange={e => setAuthEmail(e.target.value)}
+                placeholder="Tài khoản (email)" className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
+              <div className="relative">
+                <input type={showPassword ? 'text' : 'password'} value={authPassword} onChange={e => setAuthPassword(e.target.value)}
+                  placeholder="Mật khẩu" onKeyDown={e => e.key === 'Enter' && handleAuthSubmit()}
+                  className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50 pr-10" />
+                <button type="button" onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              <button onClick={handleAuthSubmit}
+                className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95">
+                {authMode === 'login' ? <><LogIn size={14} className="inline mr-1.5" />Đăng Nhập</> : <><UserPlus size={14} className="inline mr-1.5" />Tạo Tài Khoản</>}
+              </button>
+            </div>
+            <div className="mt-4 text-center">
+              <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="text-xs text-cyan-400 hover:text-cyan-300">
+                {authMode === 'login' ? 'Chưa có tài khoản? Đăng ký' : 'Đã có tài khoản? Đăng nhập'}
+              </button>
+            </div>
+            {authMode === 'login' && (
+              <div className="mt-2 text-center">
+                <button onClick={() => setShowForgot(true)} className="text-[10px] text-cyan-400/70 hover:text-cyan-300 transition-colors">
+                  Quên Mật Khẩu?
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

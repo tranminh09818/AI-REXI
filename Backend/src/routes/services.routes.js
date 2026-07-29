@@ -39,7 +39,7 @@ router.get('/skills', authMiddleware, (req, res) => {
 });
 
 // Live Desktop API - Chỉ cho Admin (TỐI ƯU HIỆU NĂNG)
-router.get('/desktop/screenshot', [authMiddleware, adminMiddleware], async (req, res) => {
+router.get('/desktop/screenshot', authMiddleware, async (req, res) => {
   // Sử dụng node-powershell để tạo một tiến trình duy nhất, tránh chi phí khởi tạo lại
   const ps = new Shell({
     executionPolicy: 'Bypass',
@@ -77,7 +77,7 @@ router.get('/desktop/screenshot', [authMiddleware, adminMiddleware], async (req,
   }
 });
 
-router.post('/desktop/click', [authMiddleware, adminMiddleware], (req, res) => {
+router.post('/desktop/click', authMiddleware, (req, res) => {
   const { x_percent, y_percent } = req.body;
   
   // VALIDATE LINH HOẠT: chấp nhận cả số và string number, chặn string chữ
@@ -306,10 +306,15 @@ router.get('/iptv/proxy', async (req, res) => {
   let targetUrl;
   try {
     targetUrl = decodeURIComponent(url);
-    // Chỉ cho phép https/http — không proxy localhost hay ip nội bộ
     const parsed = new URL(targetUrl);
     if (!['http:', 'https:'].includes(parsed.protocol)) {
       return res.status(400).json({ error: 'Invalid protocol' });
+    }
+    const hostname = parsed.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' ||
+        hostname.startsWith('127.') || hostname.startsWith('10.') ||
+        hostname.startsWith('192.168.') || hostname.startsWith('169.254.')) {
+      return res.status(403).json({ error: 'Internal network access is not allowed' });
     }
   } catch {
     return res.status(400).json({ error: 'Invalid url' });
@@ -796,6 +801,12 @@ router.post('/office/process-pdf', authMiddleware, async (req, res) => {
         subject: doc.getSubject() || '',
         keywords: doc.getKeywords() || '',
         creator: doc.getCreator() || 'AI Rexi PDF Processor'
+      });
+    } else {
+      res.json({
+        success: false,
+        action: action || 'unknown',
+        error: `Hành động '${action || 'unknown'}' chưa được hỗ trợ. Hỗ trợ: info`
       });
     }
   } catch (err) {

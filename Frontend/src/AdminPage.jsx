@@ -307,7 +307,7 @@ export default function AdminPage() {
           {!loading && !error && (
             <>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
+                <table className="w-full text-sm text-left table-fixed">
                   <thead className="bg-[#13151a] border-b border-white/10">
                     <tr>
                       <th className="px-5 py-3 text-slate-400 font-semibold text-xs uppercase tracking-wider">Người Dùng</th>
@@ -364,7 +364,7 @@ export default function AdminPage() {
                                   onClick={() => changeRole(user.ma_nguoi_dung, isAdmin ? 'user' : 'admin')}
                                   disabled={roleLoading}
                                   title={isAdmin ? 'Hạ xuống User' : 'Nâng lên Admin'}
-                                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 ${
+                                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 min-w-[90px] justify-center whitespace-nowrap ${
                                     isAdmin
                                       ? 'bg-slate-500/20 hover:bg-slate-500/30 text-slate-300 border border-slate-500/30'
                                       : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30'
@@ -381,7 +381,7 @@ export default function AdminPage() {
                                   onClick={() => changeStatus(user.ma_nguoi_dung, isBanned ? 'active' : 'banned')}
                                   disabled={statusLoading}
                                   title={isBanned ? 'Mở khoá' : 'Khoá tài khoản'}
-                                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 ${
+                                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 min-w-[85px] justify-center whitespace-nowrap ${
                                     isBanned
                                       ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30'
                                       : 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30'

@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'your-very-secret-key-for-rexi-ai';
+const { JWT_SECRET } = require('./auth.middleware');
 
 const requestCounts = new Map();
 const WINDOW_MS = 60 * 1000; // 1 minute window
