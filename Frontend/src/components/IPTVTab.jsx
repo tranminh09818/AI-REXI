@@ -208,49 +208,7 @@ export default function IPTVTab({
             placeholder="Tìm kênh..."
             className="w-full mt-2 px-2 py-1.5 bg-[#1a1b24] border border-white/5 rounded-lg text-[10px] text-white placeholder-slate-600 outline-none focus:border-rose-500/30"
           />
-          {/* Compact filter dropdown */}
-          {iptvTab === 'category' && (
-            <div className="mt-2 flex items-center gap-1.5">
-              <select
-                value={iptvCategory || ''}
-                onChange={e => { setIptvCategory?.(e.target.value); fetchIPTV?.(e.target.value); }}
-                className="flex-1 px-2 py-1.5 bg-[#1a1b24] border border-white/5 rounded-lg text-[10px] text-white outline-none focus:border-rose-500/30 cursor-pointer appearance-none"
-              >
-                <option value="">🌟 Tất cả thể loại</option>
-                {IPTV_CATEGORIES.map(cat => (
-                  <option key={cat.id} value={cat.id}>{cat.name}</option>
-                ))}
-              </select>
-              {iptvCategory && (
-                <button onClick={() => { setIptvCategory?.(''); fetchIPTV?.(''); }}
-                  className="px-1.5 py-1 text-[9px] text-slate-500 hover:text-rose-400 transition-colors shrink-0"
-                  title="Xoá bộ lọc">
-                  ✕
-                </button>
-              )}
-            </div>
-          )}
-          {iptvTab === 'country' && (
-            <div className="mt-2 flex items-center gap-1.5">
-              <select
-                value={iptvCountry || ''}
-                onChange={e => { setIptvCountry?.(e.target.value); fetchIPTV?.(e.target.value); }}
-                className="flex-1 px-2 py-1.5 bg-[#1a1b24] border border-white/5 rounded-lg text-[10px] text-white outline-none focus:border-rose-500/30 cursor-pointer appearance-none"
-              >
-                <option value="">🌍 Tất cả quốc gia</option>
-                {IPTV_COUNTRIES.map(co => (
-                  <option key={co.id} value={co.id}>{co.name}</option>
-                ))}
-              </select>
-              {iptvCountry && (
-                <button onClick={() => { setIptvCountry?.(''); fetchIPTV?.(''); }}
-                  className="px-1.5 py-1 text-[9px] text-slate-500 hover:text-rose-400 transition-colors shrink-0"
-                  title="Xoá bộ lọc">
-                  ✕
-                </button>
-              )}
-            </div>
-          )}
+          
         </div>
         <div className="flex-1 overflow-y-auto">
           {safeChannels.map((ch, i) => (
