@@ -151,26 +151,29 @@ export default function ChatTab({
             <button
               type="button"
               onClick={() => setChatModeOpen(!chatModeOpen)}
-              className="flex items-center gap-1.5 bg-[#131417] text-xs font-medium border border-white/20 rounded-xl px-3 py-1.5 cursor-pointer hover:bg-[#1a1b20] transition-all min-w-[120px] justify-between text-slate-200"
+              className="flex items-center gap-1.5 bg-[#13141c] border border-white/20 hover:border-cyan-500/40 rounded-xl px-3 py-1.5 cursor-pointer text-xs font-semibold transition-all min-w-[125px] justify-between text-cyan-300 shadow-md"
             >
-              <span>{executionMode === 'agent' ? '⚡ Agent Mode' : '💬 Chat AI'}</span>
-              <span className="text-slate-400 text-xs">^</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-cyan-400">{executionMode === 'agent' ? '⚡' : '💬'}</span>
+                <span>{executionMode === 'agent' ? 'Agent Mode' : 'Chat AI'}</span>
+              </div>
+              <span className="text-slate-400 text-[10px] ml-1">^</span>
             </button>
 
             {chatModeOpen && (
-              <div className="absolute bottom-full left-0 mb-1.5 w-60 bg-[#161722] border border-white/10 rounded-2xl shadow-2xl p-1.5 z-50">
+              <div className="absolute bottom-full left-0 mb-2 w-64 bg-[#141522] border border-white/10 rounded-2xl shadow-2xl p-2 z-50">
                 {/* Option 1: Chat AI */}
                 <button
                   type="button"
                   onClick={() => { setExecutionMode('chat'); setChatModeOpen(false); }}
-                  className={`w-full flex items-start gap-2.5 p-2.5 rounded-xl transition-colors text-left cursor-pointer ${
-                    executionMode !== 'agent' ? 'bg-[#1e1f2b] border border-white/10' : 'hover:bg-white/5 border border-transparent'
+                  className={`w-full flex items-start gap-3 p-3 rounded-xl transition-all text-left cursor-pointer ${
+                    executionMode !== 'agent' ? 'bg-[#1b1c2e] border border-white/10' : 'hover:bg-white/5 border border-transparent'
                   }`}
                 >
-                  <span className="text-sm shrink-0 mt-0.5">💬</span>
+                  <span className="text-base shrink-0 mt-0.5">💬</span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold text-slate-200">Chat AI</div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">Trò chuyện AI thông thường</div>
+                    <div className="text-xs font-bold text-slate-100">Chat AI</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5 leading-tight">Trò chuyện AI thông thường</div>
                   </div>
                 </button>
 
@@ -178,14 +181,14 @@ export default function ChatTab({
                 <button
                   type="button"
                   onClick={() => { setExecutionMode('agent'); setChatModeOpen(false); }}
-                  className={`w-full flex items-start gap-2.5 p-2.5 rounded-xl transition-colors text-left mt-1 cursor-pointer ${
-                    executionMode === 'agent' ? 'bg-[#2b1b42] border border-purple-500/30' : 'hover:bg-white/5 border border-transparent'
+                  className={`w-full flex items-start gap-3 p-3 rounded-xl transition-all text-left mt-1.5 cursor-pointer ${
+                    executionMode === 'agent' ? 'bg-[#2b1845] border border-purple-500/40 shadow-sm' : 'hover:bg-white/5 border border-transparent'
                   }`}
                 >
-                  <span className="text-sm shrink-0 mt-0.5 text-purple-400">⚡</span>
+                  <span className="text-base shrink-0 mt-0.5 text-purple-300">⚡</span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold text-purple-300">Agent Mode</div>
-                    <div className="text-[11px] text-purple-300/80 mt-0.5">Tự động thực thi code & tác vụ</div>
+                    <div className="text-xs font-bold text-purple-200">Agent Mode</div>
+                    <div className="text-[11px] text-purple-300/80 mt-0.5 leading-tight">Tự động thực thi code & tác vụ</div>
                   </div>
                 </button>
               </div>
