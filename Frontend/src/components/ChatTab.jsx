@@ -147,33 +147,33 @@ export default function ChatTab({
         <div className="flex items-center bg-[#181920] border border-white/10 focus-within:border-cyan-500/50 rounded-2xl px-4 py-2.5 shadow-xl transition-all">
           
           {/* Mode Selector */}
-          <div className="relative mr-2" ref={dropdownRef}>
+          <div className="relative mr-1.5" ref={dropdownRef}>
             <button
               type="button"
               onClick={() => setChatModeOpen(!chatModeOpen)}
-              className="flex items-center gap-1.5 bg-[#13141c] border border-white/20 hover:border-cyan-500/40 rounded-xl px-3 py-1.5 cursor-pointer text-xs font-semibold transition-all min-w-[125px] justify-between text-cyan-300 shadow-md"
+              className="flex items-center gap-1 bg-[#13141c] border border-white/20 hover:border-cyan-500/40 rounded-lg px-2.5 py-1 cursor-pointer text-[11px] font-semibold transition-all justify-between text-cyan-300 shadow-sm"
             >
-              <div className="flex items-center gap-1.5">
-                <span className="text-cyan-400">{executionMode === 'agent' ? '⚡' : '💬'}</span>
+              <div className="flex items-center gap-1">
+                <span className="text-cyan-400 text-xs">{executionMode === 'agent' ? '⚡' : '💬'}</span>
                 <span>{executionMode === 'agent' ? 'Agent Mode' : 'Chat AI'}</span>
               </div>
-              <span className="text-slate-400 text-[10px] ml-1">^</span>
+              <span className="text-slate-400 text-[9px] ml-1">^</span>
             </button>
 
             {chatModeOpen && (
-              <div className="absolute bottom-full left-0 mb-2 w-64 bg-[#141522] border border-white/10 rounded-2xl shadow-2xl p-2 z-50">
+              <div className="absolute bottom-full left-0 mb-1 w-52 bg-[#141522] border border-white/10 rounded-xl shadow-xl p-1 z-50">
                 {/* Option 1: Chat AI */}
                 <button
                   type="button"
                   onClick={() => { setExecutionMode('chat'); setChatModeOpen(false); }}
-                  className={`w-full flex items-start gap-3 p-3 rounded-xl transition-all text-left cursor-pointer ${
+                  className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-lg transition-all text-left cursor-pointer ${
                     executionMode !== 'agent' ? 'bg-[#1b1c2e] border border-white/10' : 'hover:bg-white/5 border border-transparent'
                   }`}
                 >
-                  <span className="text-base shrink-0 mt-0.5">💬</span>
+                  <span className="text-xs shrink-0 mt-0.5">💬</span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold text-slate-100">Chat AI</div>
-                    <div className="text-[11px] text-slate-400 mt-0.5 leading-tight">Trò chuyện AI thông thường</div>
+                    <div className="text-[11px] font-bold text-slate-100">Chat AI</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 leading-tight">Trò chuyện AI thông thường</div>
                   </div>
                 </button>
 
@@ -181,14 +181,14 @@ export default function ChatTab({
                 <button
                   type="button"
                   onClick={() => { setExecutionMode('agent'); setChatModeOpen(false); }}
-                  className={`w-full flex items-start gap-3 p-3 rounded-xl transition-all text-left mt-1.5 cursor-pointer ${
+                  className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-lg transition-all text-left mt-1 cursor-pointer ${
                     executionMode === 'agent' ? 'bg-[#2b1845] border border-purple-500/40 shadow-sm' : 'hover:bg-white/5 border border-transparent'
                   }`}
                 >
-                  <span className="text-base shrink-0 mt-0.5 text-purple-300">⚡</span>
+                  <span className="text-xs shrink-0 mt-0.5 text-purple-300">⚡</span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold text-purple-200">Agent Mode</div>
-                    <div className="text-[11px] text-purple-300/80 mt-0.5 leading-tight">Tự động thực thi code & tác vụ</div>
+                    <div className="text-[11px] font-bold text-purple-200">Agent Mode</div>
+                    <div className="text-[10px] text-purple-300/80 mt-0.5 leading-tight">Tự động thực thi code & tác vụ</div>
                   </div>
                 </button>
               </div>
