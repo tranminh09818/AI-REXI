@@ -151,87 +151,26 @@ export default function ChatTab({
             <button
               type="button"
               onClick={() => setChatModeOpen(!chatModeOpen)}
-              className={`group flex items-center gap-2 px-3 py-1.5 rounded-xl cursor-pointer transition-all duration-200 border text-xs font-semibold shadow-md select-none ${
-                executionMode === 'agent'
-                  ? 'bg-gradient-to-r from-purple-950/70 via-indigo-950/60 to-purple-900/70 text-purple-200 border-purple-500/50 hover:border-purple-400 shadow-purple-950/40 hover:shadow-purple-500/20'
-                  : 'bg-[#121319] text-cyan-200 border-cyan-500/40 hover:border-cyan-400 hover:bg-[#191b24] shadow-cyan-950/30 hover:shadow-cyan-500/20'
-              }`}
+              className="flex items-center gap-1.5 bg-[#131417] text-xs font-medium border border-white/20 rounded-xl px-3 py-1.5 cursor-pointer hover:bg-[#1a1b20] transition-all min-w-[120px] justify-between text-slate-200"
             >
-              {executionMode === 'agent' ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
-                  </span>
-                  <Zap size={14} className="text-amber-400 fill-amber-400/30 animate-pulse" />
-                  <span className="bg-gradient-to-r from-purple-200 to-amber-200 bg-clip-text text-transparent font-bold">
-                    ⚡ Agent Mode
-                  </span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5">
-                  <span className="relative flex h-2 w-2">
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-400"></span>
-                  </span>
-                  <MessageSquare size={14} className="text-cyan-400" />
-                  <span className="bg-gradient-to-r from-cyan-200 to-blue-200 bg-clip-text text-transparent font-bold">
-                    Chat AI
-                  </span>
-                </div>
-              )}
-              <ChevronDown
-                size={14}
-                className={`transition-transform duration-200 ml-0.5 ${
-                  chatModeOpen
-                    ? 'rotate-180 ' + (executionMode === 'agent' ? 'text-purple-300' : 'text-cyan-300')
-                    : 'text-slate-400 group-hover:text-slate-200'
-                }`}
-              />
+              <span>{executionMode === 'agent' ? '⚡ Agent Mode' : '💬 Chat AI'}</span>
+              <span className="text-slate-400 text-xs">^</span>
             </button>
 
             {chatModeOpen && (
-              <div className="absolute bottom-full left-0 mb-2 w-72 sm:w-[290px] bg-[#11121a]/95 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9)] p-2 z-50 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/5">
-                {/* Header */}
-                <div className="px-2 py-1 mb-1.5 border-b border-white/10 flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Layers size={12} className="text-cyan-400" /> Chế độ xử lý
-                  </span>
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/5 text-slate-400 border border-white/10 font-mono">
-                    Rexi OS v2
-                  </span>
-                </div>
-
+              <div className="absolute bottom-full left-0 mb-1.5 w-60 bg-[#161722] border border-white/10 rounded-2xl shadow-2xl p-1.5 z-50">
                 {/* Option 1: Chat AI */}
                 <button
                   type="button"
                   onClick={() => { setExecutionMode('chat'); setChatModeOpen(false); }}
-                  className={`w-full flex items-start gap-2.5 p-2.5 rounded-xl border transition-all text-left group cursor-pointer ${
-                    executionMode !== 'agent'
-                      ? 'bg-gradient-to-r from-cyan-500/15 via-blue-500/5 to-transparent border-cyan-500/40 shadow-sm shadow-cyan-500/10'
-                      : 'border-transparent hover:bg-white/5 text-slate-300 hover:text-white'
+                  className={`w-full flex items-start gap-2.5 p-2.5 rounded-xl transition-colors text-left cursor-pointer ${
+                    executionMode !== 'agent' ? 'bg-[#1e1f2b] border border-white/10' : 'hover:bg-white/5 border border-transparent'
                   }`}
                 >
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 transition-colors ${
-                    executionMode !== 'agent'
-                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                      : 'bg-white/5 text-slate-400 group-hover:bg-cyan-500/10 group-hover:text-cyan-300'
-                  }`}>
-                    <MessageSquare size={15} />
-                  </div>
+                  <span className="text-sm shrink-0 mt-0.5">💬</span>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className={`text-xs font-bold ${executionMode !== 'agent' ? 'text-cyan-200' : 'text-slate-200 group-hover:text-cyan-300'}`}>
-                        Chat AI
-                      </span>
-                      {executionMode !== 'agent' && (
-                        <span className="w-4 h-4 rounded-full bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center text-cyan-300">
-                          <Check size={10} strokeWidth={3} />
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                      Hỏi đáp thông thường, phản hồi nhanh trực tiếp từ AI.
-                    </p>
+                    <div className="text-xs font-bold text-slate-200">Chat AI</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">Trò chuyện AI thông thường</div>
                   </div>
                 </button>
 
@@ -239,38 +178,14 @@ export default function ChatTab({
                 <button
                   type="button"
                   onClick={() => { setExecutionMode('agent'); setChatModeOpen(false); }}
-                  className={`w-full flex items-start gap-2.5 p-2.5 rounded-xl border transition-all text-left mt-1.5 group cursor-pointer ${
-                    executionMode === 'agent'
-                      ? 'bg-gradient-to-r from-purple-500/20 via-pink-500/10 to-transparent border-purple-500/40 shadow-sm shadow-purple-500/15'
-                      : 'border-transparent hover:bg-white/5 text-slate-300 hover:text-white'
+                  className={`w-full flex items-start gap-2.5 p-2.5 rounded-xl transition-colors text-left mt-1 cursor-pointer ${
+                    executionMode === 'agent' ? 'bg-[#2b1b42] border border-purple-500/30' : 'hover:bg-white/5 border border-transparent'
                   }`}
                 >
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 transition-colors ${
-                    executionMode === 'agent'
-                      ? 'bg-purple-500/25 text-amber-300 border border-purple-500/40 shadow-sm shadow-purple-500/20'
-                      : 'bg-white/5 text-slate-400 group-hover:bg-purple-500/10 group-hover:text-amber-300'
-                  }`}>
-                    <Zap size={15} className="fill-amber-400/30" />
-                  </div>
+                  <span className="text-sm shrink-0 mt-0.5 text-purple-400">⚡</span>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-xs font-bold ${executionMode === 'agent' ? 'text-purple-200' : 'text-slate-200 group-hover:text-purple-300'}`}>
-                          ⚡ Agent Mode
-                        </span>
-                        <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-gradient-to-r from-amber-500/20 to-purple-500/20 text-amber-300 border border-amber-500/30">
-                          35+ Skills
-                        </span>
-                      </div>
-                      {executionMode === 'agent' && (
-                        <span className="w-4 h-4 rounded-full bg-purple-500/20 border border-purple-400/50 flex items-center justify-center text-purple-300">
-                          <Check size={10} strokeWidth={3} />
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                      Tự động lập kế hoạch, gọi Tools & thực thi chuỗi tác vụ nâng cao.
-                    </p>
+                    <div className="text-xs font-bold text-purple-300">Agent Mode</div>
+                    <div className="text-[11px] text-purple-300/80 mt-0.5">Tự động thực thi code & tác vụ</div>
                   </div>
                 </button>
               </div>
@@ -288,7 +203,7 @@ export default function ChatTab({
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
-            placeholder="Hỏi AI Rexi bất cứ điều gì..."
+            placeholder="Hỏi AI Rexi bất cứ điều gì... (Enter để gửi)"
             rows={1}
             className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-500 outline-none resize-none max-h-32 px-2"
           />
