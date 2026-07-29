@@ -147,11 +147,11 @@ export default function ChatTab({
         <div className="flex items-center bg-[#181920] border border-white/10 focus-within:border-cyan-500/50 rounded-2xl px-4 py-2.5 shadow-xl transition-all">
           
           {/* Mode Selector */}
-          <div className="relative mr-1.5" ref={dropdownRef}>
+          <div className="relative mr-1.5 shrink-0" ref={dropdownRef}>
             <button
               type="button"
               onClick={() => setChatModeOpen(!chatModeOpen)}
-              className="flex items-center gap-1 bg-[#13141c] border border-white/20 hover:border-cyan-500/40 rounded-lg px-2.5 py-1 cursor-pointer text-[11px] font-semibold transition-all justify-between text-cyan-300 shadow-sm"
+              className="flex items-center gap-1 bg-[#13141c] border border-white/20 hover:border-cyan-500/40 rounded-lg px-2.5 py-1 cursor-pointer text-[11px] font-semibold transition-all justify-between text-cyan-300 shadow-sm w-[110px] shrink-0 select-none"
             >
               <div className="flex items-center gap-1">
                 <span className="text-cyan-400 text-xs">{executionMode === 'agent' ? '⚡' : '💬'}</span>

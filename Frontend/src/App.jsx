@@ -794,7 +794,7 @@ noi_dung: isAgentLimit
                   setModelName(e.target.value);
                   localStorage.setItem('rexi_model', e.target.value);
                 }}
-                className="bg-[#131417] text-xs font-medium text-cyan-300 border border-cyan-500/30 rounded-xl px-3 py-1.5 outline-none cursor-pointer hover:border-cyan-400 transition-all"
+                className="bg-[#131417] text-xs font-medium text-cyan-300 border border-cyan-500/30 rounded-xl px-3 py-1.5 outline-none cursor-pointer hover:border-cyan-400 transition-all shrink-0 min-w-[170px]"
               >
                 {POPULAR_MODELS.map(m => (
                   <option key={m.id} value={m.id} className="bg-[#1e1f20] text-slate-200">
@@ -806,7 +806,7 @@ noi_dung: isAgentLimit
               <select
                 value={aiSpecialty}
                 onChange={e => setAiSpecialty(e.target.value)}
-                className="bg-[#131417] text-xs font-medium text-slate-300 border border-white/10 rounded-xl px-3 py-1.5 outline-none cursor-pointer hover:border-white/20 transition-all"
+                className="bg-[#131417] text-xs font-medium text-slate-300 border border-white/10 rounded-xl px-3 py-1.5 outline-none cursor-pointer hover:border-white/20 transition-all shrink-0 min-w-[170px]"
               >
                 {AI_SPECIALTIES.map(s => (
                   <option key={s.id} value={s.id} className="bg-[#1e1f20] text-slate-200">
