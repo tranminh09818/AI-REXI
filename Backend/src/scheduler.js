@@ -22,16 +22,20 @@ function runScan() {
 }
 
 function startScheduler() {
-  // Chạy lần đầu sau 60s (đợi server khởi động xong)
+  // ⚠️ KHÔNG tự scan khi khởi động mặc định — scan đầy đủ 9.500+ kênh
+  // làm nghẽn CPU/network khiến server chậm và API timeout.
+  // Chỉ tự scan lần đầu khi bật IPTV_AUTO_SCAN=1 (hoặc người dùng bấm nút Scan thủ công).
+  const autoScan = process.env.IPTV_AUTO_SCAN === '1';
   const firstDelay = 60 * 1000;
 
-  console.log(`[IPTV Scheduler] Auto-scan every 7 days. First scan in ${firstDelay/1000}s.`);
+  console.log(`[IPTV Scheduler] Auto-scan every 7 days. First scan: ${autoScan ? 'sau ' + (firstDelay/1000) + 's' : 'TẮT (bật IPTV_AUTO_SCAN=1 để tự scan)'}`);
 
-  setTimeout(() => {
-    runScan();
-    // Sau đó cứ mỗi 7 ngày quét lại
-    timer = setInterval(runScan, SCAN_INTERVAL_MS);
-  }, firstDelay);
+  if (autoScan) {
+    setTimeout(() => {
+      runScan();
+      timer = setInterval(runScan, SCAN_INTERVAL_MS);
+    }, firstDelay);
+  }
 }
 
 function stopScheduler() {

@@ -15,8 +15,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@browserbasehq/stagehand": "^3.7.1",
     "@google/generative-ai": "^0.24.1",
     "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.0.2",
     "cors": "^2.8.6",
     "docx": "^9.7.1",
     "dotenv": "^17.4.2",
@@ -31,9 +33,9 @@
     "multer": "^2.2.0",
     "node-powershell": "^5.0.1",
     "pdf-lib": "^1.17.1",
-    "pptx": "^0.0.0",
+    "pg": "^8.22.0",
+    "playwright": "^1.62.0",
     "pptxgenjs": "^4.0.1",
-    "puppeteer": "^25.3.0",
-    "sqlite3": "^6.0.1"
+    "ws": "^8.21.1"
   }
 }
