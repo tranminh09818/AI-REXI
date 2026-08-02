@@ -24,7 +24,6 @@ import SkillsModal from './components/SkillsModal';
 import SuperToolsModal from './components/SuperToolsModal';
 import AdminPanel from './AdminPanel';
 import BrowserView from './components/BrowserView';
-import WebAnalyzer from './components/WebAnalyzer';
 
 // const API_BASE = "http://localhost:5000/api";  // REMOVED — vite proxy handles /api/*
 const API_BASE = "/api";
@@ -177,8 +176,16 @@ export default function App() {
   const [selectedProvider, setSelectedProvider] = useState(() => localStorage.getItem('rexi_provider') || 'gemini');
 
   // Auth Token
-  const [authToken, setAuthToken] = useState(() => localStorage.getItem('rexi_token') || '');
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('rexi_token') || null);
 
+  // User Profile
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('rexi_user'));
+      if (saved && saved.ma_nguoi_dung) return saved;
+      return null;
+    } catch { return null; }
+  });
   const authHeaders = () => {
     const h = { 'Content-Type': 'application/json' };
     if (authToken) h['Authorization'] = `Bearer ${authToken}`;
@@ -199,29 +206,17 @@ export default function App() {
       if (data.success && data.models) {
         const arr = data.models[prov || provider] || [];
         setAvailableModels(arr);
-        // Nếu model hiện tại không có trong danh sách mới → chọn model đầu tiên
         if (arr.length > 0 && !arr.find(m => m.id === modelName)) {
           setModelName(arr[0].id);
           localStorage.setItem('rexi_model', arr[0].id);
         }
       } else {
-        // Fallback: dùng POPULAR_MODELS hardcode nếu backend chưa có
         setAvailableModels(POPULAR_MODELS.filter(m => m.provider === (prov || provider)));
       }
     } catch (e) {
-      // Fallback: dùng POPULAR_MODELS hardcode nếu backend lỗi
       setAvailableModels(POPULAR_MODELS.filter(m => m.provider === (prov || provider)));
     }
   };
-
-  // User Profile
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('rexi_user'));
-      if (saved && saved.ma_nguoi_dung) return saved;
-      return null;
-    } catch { return null; }
-  });
 
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -1086,12 +1081,7 @@ useEffect(() => {
             <BrowserView token={authToken} currentUser={currentUser} onClose={() => setActiveTab('chat')} />
           )}
 
-          {/* TAB 7: WEB ANALYZER (Agent Phân Tích Web) */}
-          {activeTab === 'webanalyze' && (
-            <WebAnalyzer apiFetch={apiFetch} showToast={showToast} />
-          )}
-
-          {/* TAB 8: ADMIN PANEL */}
+          {/* TAB 7: ADMIN PANEL */}
           {activeTab === 'admin' && currentUser?.phan_quyen === 'admin' && (
             <AdminPanel token={authToken} currentUser={currentUser} onClose={() => setActiveTab('chat')} />
           )}

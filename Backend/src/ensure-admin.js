@@ -43,14 +43,17 @@ function ensureAdmin() {
                 }
 
                 if (user) {
-                    // Đảm bảo admin KHÔNG BAO GIỜ bị hạ quyền + reset password về mặc định
-                    const hashedPassword = bcrypt.hashSync('admin@rexi.com', 10);
-                    console.log('[ADMIN-SEED] Restoring admin role + password for', ADMIN_SEED.email);
-                    dbInstance.run(
-                        "UPDATE nguoi_dung SET phan_quyen = 'admin', mat_khau_ma_hoa = ? WHERE email = ?",
-                        [hashedPassword, ADMIN_SEED.email],
-                        () => resolve()
-                    );
+                    // Chỉ đảm bảo admin role, KHÔNG reset password
+                    console.log('[ADMIN-SEED] Admin exists, checking role for', ADMIN_SEED.email);
+                    if (user.phan_quyen !== 'admin') {
+                        dbInstance.run(
+                            "UPDATE nguoi_dung SET phan_quyen = 'admin' WHERE email = ?",
+                            [ADMIN_SEED.email],
+                            () => resolve()
+                        );
+                    } else {
+                        resolve();
+                    }
                 } else {
                     // Tạo admin mới
                     const maUser = crypto.randomUUID();

@@ -84,7 +84,7 @@ router.post('/register', async (req, res) => {
     );
 });
 
-// Đăng nhập
+// Đăng nhập (Hỗ trợ cả email đầy đủ lẫn nickname/username ngắn như 'admin')
 router.post('/login', (req, res) => {
     const { account, email, password } = req.body;
     const accountName = (account || email || '').trim();
@@ -92,19 +92,24 @@ router.post('/login', (req, res) => {
         return res.status(400).json({ error: 'Vui lòng nhập tài khoản và mật khẩu.' });
     }
 
-    db.get("SELECT * FROM nguoi_dung WHERE email = ?", [accountName], async (err, user) => {
-        if (err || !user) {
-            return res.status(401).json({ error: 'Email hoặc mật khẩu không đúng.' });
-        }
+    db.get(
+        "SELECT * FROM nguoi_dung WHERE LOWER(email) = LOWER(?) OR LOWER(email) = LOWER(?) OR LOWER(email) LIKE LOWER(?)",
+        [accountName, accountName === 'admin' ? 'admin@rexi.com' : accountName, accountName + '@%'],
+        async (err, user) => {
+            if (err || !user) {
+                return res.status(401).json({ error: 'Tài khoản hoặc mật khẩu không đúng.' });
+            }
 
-        const isMatch = await bcrypt.compare(password, user.mat_khau_ma_hoa);
-        if (!isMatch) {
-            return res.status(401).json({ error: 'Email hoặc mật khẩu không đúng.' });
-        }
+            let isMatch = await bcrypt.compare(password, user.mat_khau_ma_hoa);
 
-        const token = generateToken(user);
-        res.json({ success: true, token, user: sanitizeUser(user) });
-    });
+            if (!isMatch) {
+                return res.status(401).json({ error: 'Tài khoản hoặc mật khẩu không đúng.' });
+            }
+
+            const token = generateToken(user);
+            res.json({ success: true, token, user: sanitizeUser(user) });
+        }
+    );
 });
 
 // Đăng nhập Google

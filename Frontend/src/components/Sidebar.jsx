@@ -128,16 +128,6 @@ export default function Sidebar({
         >
           <Zap size={14} /> Super Tools
         </button>
-        <button
-          onClick={() => setActiveTab('webanalyze')}
-          className={`flex items-center justify-center gap-1.5 p-2 rounded-xl border text-xs font-medium transition-all ${
-            activeTab === 'webanalyze'
-              ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300'
-              : 'bg-cyan-900/30 border-cyan-500/30 text-cyan-300 hover:text-white'
-          }`}
-        >
-          <Globe size={14} /> Web Analyze
-        </button>
       </div>
 
       {/* Search */}

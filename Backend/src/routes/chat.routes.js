@@ -475,6 +475,11 @@ router.post('/conversations/:id/messages', (req, res, next) => {
     async (err) => {
       if (err) return res.status(500).json({ error: err.message });
 
+      // Tăng số lượng tin nhắn đã dùng cho khách CHỈ KHI thực sự gửi tin nhắn thành công
+      if (!req.user && req.session) {
+        req.session.messageCount = (req.session.messageCount || 0) + 1;
+      }
+
       db.get("SELECT tieu_de FROM cuoc_hoi_thoai WHERE ma_hoi_thoai = ?", [id], (err, convRow) => {
         if (convRow && (convRow.tieu_de === 'Trò chuyện mới' || !convRow.tieu_de)) {
           const newTitle = taoTieuDeThongMinh(noi_dung);

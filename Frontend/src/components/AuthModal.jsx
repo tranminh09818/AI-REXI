@@ -74,12 +74,14 @@ export default function AuthModal({
               </h2>
               <button onClick={() => setAuthModalOpen(false)} className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"><X size={16} /></button>
             </div>
-            <div className="space-y-3">
+            <form onSubmit={(e) => { e.preventDefault(); handleAuthSubmit(); }} className="space-y-3">
               {authMode === 'register' && (
                 <input type="text" value={authFullName} onChange={e => setAuthFullName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleAuthSubmit()}
                   placeholder="Họ và tên" className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
               )}
               <input type="text" value={authEmail} onChange={e => setAuthEmail(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAuthSubmit()}
                 placeholder="Tài khoản (email)" className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
               <div className="relative">
                 <input type={showPassword ? 'text' : 'password'} value={authPassword} onChange={e => setAuthPassword(e.target.value)}
@@ -90,11 +92,11 @@ export default function AuthModal({
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
-              <button onClick={handleAuthSubmit}
-                className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95">
-                {authMode === 'login' ? <><LogIn size={14} className="inline mr-1.5" />Đăng Nhập</> : <><UserPlus size={14} className="inline mr-1.5" />Tạo Tài Khoản</>}
+              <button type="submit"
+                className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-lg shadow-cyan-500/20">
+                {authMode === 'login' ? <><LogIn size={14} />Đăng Nhập</> : <><UserPlus size={14} />Tạo Tài Khoản</>}
               </button>
-            </div>
+            </form>
             <div className="mt-4 text-center">
               <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="text-xs text-cyan-400 hover:text-cyan-300">
                 {authMode === 'login' ? 'Chưa có tài khoản? Đăng ký' : 'Đã có tài khoản? Đăng nhập'}
