@@ -1,6 +1,9 @@
 // Lazy-load: CHỈ require khi thực sự cần, tiết kiệm ~300-500MB RAM
 let chromium = null;
 const WebSocket = require('ws');
+const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
 
 function getChromium() {
   if (!chromium) {
@@ -68,10 +71,19 @@ class BrowserStreamService {
       if (!this.page || this.clients.size === 0) return;
 
       try {
-        const screenshot = await this.page.screenshot({
-          type: 'jpeg',
-          quality: 40, // was 70 — smaller buffer, less RAM
-        });
+        let screenshot;
+        // CDP session hoạt động ổn định hơn page.screenshot() với headless-shell
+        if (this.cdpSession) {
+          try {
+            const result = await this.cdpSession.send('Page.captureScreenshot', { format: 'jpeg', quality: 40 });
+            screenshot = Buffer.from(result.data, 'base64');
+          } catch (cdpErr) {
+            // Fallback sang page.screenshot() nếu CDP fail
+            screenshot = await this.page.screenshot({ type: 'jpeg', quality: 40 });
+          }
+        } else {
+          screenshot = await this.page.screenshot({ type: 'jpeg', quality: 40 });
+        }
 
         const frameData = `data:image/jpeg;base64,${screenshot.toString('base64')}`;
         const message = JSON.stringify({ type: 'frame', data: frameData });
@@ -319,6 +331,16 @@ class BrowserStreamService {
     }
     this.clients.forEach(c => { try { c.close(); } catch (e) {} });
     this.clients.clear();
+
+    // Force-kill any zombie chrome-headless-shell / chromium processes
+    // (browser.close() đôi khi không kill hết trên Windows)
+    try {
+      await execPromise('taskkill /F /IM chrome-headless-shell.exe 2>nul & taskkill /F /IM chromium.exe 2>nul & taskkill /F /IM chrome.exe 2>nul');
+      console.log('[BrowserStream] Force-killed any remaining browser processes');
+    } catch (e) {
+      // Ignore — nếu không có process nào thì taskkill vẫn lỗi, không sao
+    }
+
     console.log('[BrowserStream] Closed — RAM freed');
   }
 

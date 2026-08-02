@@ -26,7 +26,6 @@ function findOrCreateUser(email, name, avatar, provider, done) {
     db.get("SELECT * FROM nguoi_dung WHERE email = ?", [email], (err, user) => {
         if (err) return done(err);
         if (user) {
-            // Cập nhật tên và ảnh nếu có
             const updates = [];
             const params = [];
             if (name && name !== user.ten_day_du) { updates.push("ten_day_du = ?"); params.push(name); }
@@ -108,7 +107,7 @@ router.post('/login', (req, res) => {
     });
 });
 
-// Đăng nhập Google - gui credential tu Google Identity Services
+// Đăng nhập Google
 router.post('/google', (req, res) => {
     const { credential } = req.body;
     if (!credential) {
@@ -116,15 +115,12 @@ router.post('/google', (req, res) => {
     }
 
     try {
-        // Decode Google JWT (Google's SDK tra ve JWT da verify)
-        // Header.payload.signature — payload chua user info
         const parts = credential.split('.');
         if (parts.length !== 3) {
             return res.status(400).json({ error: 'Credential không hợp lệ.' });
         }
 
         const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-
         const email = payload.email;
         const name = payload.name || payload.given_name || email.split('@')[0];
         const avatar = payload.picture || null;
@@ -149,9 +145,7 @@ router.post('/google', (req, res) => {
     }
 });
 
-// ==================== FORGOT / RESET PASSWORD ====================
-
-// Quên mật khẩu — tạo OTP code 6 số
+// FORGOT / RESET PASSWORD
 router.post('/forgot-password', (req, res) => {
     const { account, email } = req.body;
     const accountName = (account || email || '').trim();
@@ -160,13 +154,12 @@ router.post('/forgot-password', (req, res) => {
     }
 
     db.get("SELECT * FROM nguoi_dung WHERE email = ?", [accountName], (err, user) => {
-        // Luôn trả về thành công để tránh leak email tồn tại
         if (err || !user) {
             return res.json({ success: true, message: 'Nếu tài khoản tồn tại, mã OTP đã được tạo.' });
         }
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 phut
+        const otpExpiry = Date.now() + 10 * 60 * 1000;
 
         db.run(
             "UPDATE nguoi_dung SET otp_code = ?, otp_expiry = ? WHERE ma_nguoi_dung = ?",
@@ -175,7 +168,6 @@ router.post('/forgot-password', (req, res) => {
                 if (err) {
                     return res.status(500).json({ error: 'Lỗi hệ thống.' });
                 }
-                // Trong production gửi email, o day tra ve truc tiep de debug
                 console.log(`[Auth] OTP for ${accountName}: ${otpCode}`);
                 const payload = { success: true, message: 'Mã OTP đã được tạo.' };
                 if (process.env.NODE_ENV !== 'production') payload.otp_debug = otpCode;
@@ -185,7 +177,6 @@ router.post('/forgot-password', (req, res) => {
     });
 });
 
-// Xác nhận OTP và đặt mật khẩu mới
 router.post('/reset-password', async (req, res) => {
     const { account, email, otp_code, new_password } = req.body;
     const accountName = (account || email || '').trim();
@@ -201,17 +192,14 @@ router.post('/reset-password', async (req, res) => {
             return res.status(400).json({ error: 'Tài khoản không tồn tại.' });
         }
 
-        // Kiem tra OTP
         if (!user.otp_code || user.otp_code !== otp_code) {
             return res.status(400).json({ error: 'Mã OTP không đúng.' });
         }
 
-        // Kiểm tra hết hạn
         if (!user.otp_expiry || Date.now() > user.otp_expiry) {
             return res.status(400).json({ error: 'Mã OTP đã hết hạn. Vui lòng yêu cầu lại.' });
         }
 
-        // Cập nhật mật khẩu mới và xóa OTP
         const hashedPassword = await bcrypt.hash(new_password, 10);
         db.run(
             "UPDATE nguoi_dung SET mat_khau_ma_hoa = ?, otp_code = NULL, otp_expiry = NULL WHERE ma_nguoi_dung = ?",
@@ -229,7 +217,9 @@ router.post('/reset-password', async (req, res) => {
 // ADMIN: Lấy danh sách tất cả người dùng
 router.get('/users', [authMiddleware, adminMiddleware], (req, res) => {
     const { search = '', page = 1, limit = 8 } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const lm = parseInt(limit) || 8;
+    const pg = parseInt(page) || 1;
+    const offset = (pg - 1) * lm;
 
     const searchCondition = `WHERE email LIKE ? OR ten_day_du LIKE ?`;
     const searchParams = [`%${search}%`, `%${search}%`];
@@ -239,8 +229,8 @@ router.get('/users', [authMiddleware, adminMiddleware], (req, res) => {
     db.get(countQuery, search ? searchParams : [], (err, row) => {
         if (err) return res.status(500).json({ error: 'Lỗi truy vấn CSDL (count).' });
 
-        const totalUsers = row.total;
-        const totalPages = Math.ceil(totalUsers / limit);
+        const totalUsers = row ? (row.total || row.TOTAL || 0) : 0;
+        const totalPages = Math.ceil(totalUsers / lm) || 1;
 
         const dataQuery = `
             SELECT ma_nguoi_dung, email, ten_day_du, phan_quyen, trang_thai, anh_dai_dien, ngay_tao 
@@ -250,10 +240,13 @@ router.get('/users', [authMiddleware, adminMiddleware], (req, res) => {
             LIMIT ? OFFSET ?
         `;
 
-        db.all(dataQuery, search ? [...searchParams, limit, offset] : [limit, offset], (err, users) => {
-            if (err) return res.status(500).json({ error: 'Lỗi truy vấn CSDL (data).' });
+        db.all(dataQuery, search ? [...searchParams, lm, offset] : [lm, offset], (err, users) => {
+            if (err) {
+                console.error('[ADMIN-USERS] Data query error:', err);
+                return res.status(500).json({ error: 'Lỗi truy vấn CSDL (data).' });
+            }
 
-            res.json({ users, totalPages, currentPage: parseInt(page), totalUsers });
+            res.json({ users: users || [], totalPages, currentPage: pg, totalUsers });
         });
     });
 });

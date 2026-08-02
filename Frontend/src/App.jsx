@@ -7,7 +7,7 @@ import {
   Globe, ChevronDown, Zap, MessageSquare, MoreHorizontal,
   ThumbsUp, ThumbsDown, RefreshCw, Edit3, Star, Play, ArrowUp, ArrowDown,
   Sparkles, Monitor, Sun, Moon, Tv, Eye, Code, Layout, Sliders,
-  ChevronRight, Activity, Terminal, Shield, Radio, HeartPulse, Wifi, FileSpreadsheet, Presentation, LogOut, LogIn, Lock, ToggleLeft, ToggleRight, Server, GitBranch, GitCommit, EyeOff
+  ChevronRight, ChevronUp, Activity, Terminal, Shield, Radio, HeartPulse, Wifi, FileSpreadsheet, Presentation, LogOut, LogIn, Lock, ToggleLeft, ToggleRight, Server, GitBranch, GitCommit, EyeOff
 } from 'lucide-react';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
@@ -23,8 +23,11 @@ import SettingsModal from './components/SettingsModal';
 import SkillsModal from './components/SkillsModal';
 import SuperToolsModal from './components/SuperToolsModal';
 import AdminPanel from './AdminPanel';
+import BrowserView from './components/BrowserView';
+import WebAnalyzer from './components/WebAnalyzer';
 
-const API_BASE = "http://localhost:5000/api";
+// const API_BASE = "http://localhost:5000/api";  // REMOVED — vite proxy handles /api/*
+const API_BASE = "/api";
 
 marked.setOptions({
   highlight: (code, lang) => {
@@ -47,14 +50,6 @@ const POPULAR_MODELS = [
   { id: 'opencode/qwen-2.5-coder-32b-free', provider: 'opencode', name: 'Qwen Coder 2.5', label: 'Free Code', type: 'free' },
 ];
 
-const PROVIDERS = {
-  gemini: { name: 'Google Gemini', short: 'Gemini', needKey: true, placeholder: 'AIzaSy...' },
-  opencode: { name: 'OpenCode Agent', short: 'OpenCode', needKey: false, placeholder: 'Internal Engine' },
-  openai: { name: 'OpenAI GPT-4o', short: 'GPT-4o', needKey: true, placeholder: 'sk-proj-...' },
-  claude: { name: 'Anthropic Claude', short: 'Claude', needKey: true, placeholder: 'sk-ant-...' },
-  deepseek: { name: 'DeepSeek AI', short: 'DeepSeek', needKey: true, placeholder: 'sk-...' },
-  groq: { name: 'Groq Cloud', short: 'Groq', needKey: true, placeholder: 'gsk_...' }
-};
 
 const AI_SPECIALTIES = [
   { id: 'general', name: '🧠 Trợ Lý Toàn Năng' },
@@ -103,12 +98,14 @@ export default function App() {
   const handleSetActiveTab = (tab) => { setActiveTab(tab); localStorage.setItem('rexi_activeTab', tab); };
   const [filesDrawerOpen, setFilesDrawerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [fabOpen, setFabOpen] = useState(false);
 
   // AI Configuration State
   const [provider, setProvider] = useState(() => localStorage.getItem('rexi_provider') || 'gemini');
   const [modelName, setModelName] = useState(() => localStorage.getItem('rexi_model') || 'gemini-3.6-flash');
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('rexi_api_key') || '');
   const [baseUrl, setBaseUrl] = useState(() => localStorage.getItem('rexi_base_url') || '');
+  const [availableModels, setAvailableModels] = useState([]); // load động từ /api/models
   const [aiSpecialty, setAiSpecialty] = useState('general');
   const [executionMode, setExecutionMode] = useState('chat'); // 'chat' | 'agent'
   const [chatModeOpen, setChatModeOpen] = useState(false);
@@ -194,6 +191,29 @@ export default function App() {
     return fetch(url, { ...options, headers, credentials: 'include' });
   };
 
+  // Fetch danh sách model động từ backend theo provider đang chọn
+  const fetchAvailableModels = async (prov) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/models?provider=${encodeURIComponent(prov || provider)}`);
+      const data = await res.json();
+      if (data.success && data.models) {
+        const arr = data.models[prov || provider] || [];
+        setAvailableModels(arr);
+        // Nếu model hiện tại không có trong danh sách mới → chọn model đầu tiên
+        if (arr.length > 0 && !arr.find(m => m.id === modelName)) {
+          setModelName(arr[0].id);
+          localStorage.setItem('rexi_model', arr[0].id);
+        }
+      } else {
+        // Fallback: dùng POPULAR_MODELS hardcode nếu backend chưa có
+        setAvailableModels(POPULAR_MODELS.filter(m => m.provider === (prov || provider)));
+      }
+    } catch (e) {
+      // Fallback: dùng POPULAR_MODELS hardcode nếu backend lỗi
+      setAvailableModels(POPULAR_MODELS.filter(m => m.provider === (prov || provider)));
+    }
+  };
+
   // User Profile
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -242,8 +262,21 @@ export default function App() {
     fetchDbSkills();
     fetchGitStatus();
     fetchMemories();
+    fetchAvailableModels();
     if (!currentUser) fetchGuestLimits();
   }, []);
+
+  // Khi đổi provider hoặc khi có model mới được đăng tải từ Admin Panel → load lại danh sách model ở Menu Header Trang Chủ
+  useEffect(() => {
+    fetchAvailableModels(provider);
+
+    const handleModelsPublished = (e) => {
+      const prov = e.detail?.provider || provider;
+      fetchAvailableModels(prov);
+    };
+    window.addEventListener('rexi_models_published', handleModelsPublished);
+    return () => window.removeEventListener('rexi_models_published', handleModelsPublished);
+  }, [provider]);
 
   const fetchGuestLimits = async () => {
     try {
@@ -336,11 +369,12 @@ useEffect(() => {
     } catch (e) { console.log(e); }
   };
 
-  const fetchIPTV = async (cat, country) => {
+  const fetchIPTV = async (cat, country, search) => {
     try {
       let url = `${API_BASE}/services/iptv/channels?`;
-      if (country) url += `country=${country}`;
-      else if (cat) url += `category=${cat}`;
+      if (country) url += `country=${country}&`;
+      else if (cat) url += `category=${cat}&`;
+      if (search) url += `search=${encodeURIComponent(search)}`;
       const res = await apiFetch(url, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
@@ -351,6 +385,14 @@ useEffect(() => {
       }
     } catch (e) { console.log(e); }
   };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (iptvTab === 'category') fetchIPTV(iptvCategory, null, iptvSearch);
+      else fetchIPTV(null, iptvCountry, iptvSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [iptvSearch, iptvCategory, iptvCountry, iptvTab]);
 
   // HLS.js player for IPTV
   const playHlsStream = useCallback((url) => {
@@ -479,14 +521,27 @@ useEffect(() => {
       setConversations(prev => [data, ...prev]);
     }
 
+    // Double-check: nếu vẫn chưa có convId (có thể do race condition), báo lỗi thay vì gửi vào path rỗng
+    if (!convId) {
+      setMessages(prev => [...prev, {
+        ma_tin_nhan: Date.now().toString(),
+        vai_tro: 'assistant',
+        noi_dung: '⚠️ Không thể tạo cuộc trò chuyện. Vui lòng thử lại.'
+      }]);
+      setLoading(false);
+      return;
+    }
+
     const tempUserMsg = { ma_tin_nhan: Date.now().toString(), vai_tro: 'user', noi_dung: text };
     setMessages(prev => [...prev, tempUserMsg]);
     setInputText('');
     setAttachedFiles([]);
     setLoading(true);
+    let streamStarted = false;
+    const streamMsgId = 'stream_' + Date.now();
 
     try {
-      const res = await apiFetch(`${API_BASE}/chat/conversations/${convId}/messages`, {
+      const res = await apiFetch(`${API_BASE}/chat/conversations/${convId}/messages/stream`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
@@ -501,39 +556,98 @@ useEffect(() => {
         })
       });
 
-      if (res.ok) {
-        const aiMsg = await res.json();
-        if (aiMsg.noi_dung && (aiMsg.noi_dung.includes('The filename, directory name') || aiMsg.noi_dung.includes('syntax is incorrect'))) {
-          aiMsg.noi_dung = `Xin chào **${currentUser?.ten_day_du || 'USER'}**! Tôi là **AI Rexi Assistant**.\n\nHệ thống đã sẵn sàng 100% với bộ **35+ Skills Agent**, Quản Lý Files Workspace, Live IPTV & Remote Desktop Control. Bạn muốn tôi làm gì giúp bạn?`;
-        }
-        setMessages(prev => [...prev.filter(m => m.ma_tin_nhan !== tempUserMsg.ma_tin_nhan), tempUserMsg, aiMsg]);
-        fetchConversations();
-        if (!currentUser) fetchGuestLimits();
-} else if (res.status === 429) {
-         setRateLimitToast('Quá nhiều yêu cầu trong thời gian ngắn (Rate Limit Exceeded). Vui lòng đợi 1 phút.');
-         if (rateLimitTimerRef.current) clearTimeout(rateLimitTimerRef.current);
-         rateLimitTimerRef.current = setTimeout(() => setRateLimitToast(''), 5000);
-      } else if (res.status === 401) {
+      // Rate Limit (429) — middleware trả JSON trước khi vào SSE handler
+      if (res.status === 429) {
+        setRateLimitToast('Quá nhiều yêu cầu trong thời gian ngắn (Rate Limit Exceeded). Vui lòng đợi 1 phút.');
+        if (rateLimitTimerRef.current) clearTimeout(rateLimitTimerRef.current);
+        rateLimitTimerRef.current = setTimeout(() => setRateLimitToast(''), 5000);
+        return;
+      }
+
+      // Guest limit / yêu cầu đăng nhập (401) — middleware trả JSON
+      if (res.status === 401) {
         const errorData = await res.json().catch(() => ({}));
         if (errorData.code === 'LOGIN_REQUIRED' || errorData.code === 'AGENT_LIMIT_REACHED') {
           const isAgentLimit = errorData.code === 'AGENT_LIMIT_REACHED';
           setMessages(prev => [...prev.filter(m => m.ma_tin_nhan !== tempUserMsg.ma_tin_nhan), tempUserMsg, {
             ma_tin_nhan: Date.now().toString(),
             vai_tro: 'assistant',
-noi_dung: isAgentLimit 
+            noi_dung: isAgentLimit
                 ? `🔒 **Đã hết lượt Agent Mode.**\n\nBạn đã dùng hết **3 lượt** Agent cho tài khoản khách.\n\nĐăng nhập để:\n✅ Agent Mode không giới hạn\n✅ Chat không giới hạn\n✅ Lưu lịch sử & Memory`
                 : `🔒 **Đã hết lượt chat.**\n\nBạn đã dùng hết **10 tin nhắn** cho tài khoản khách.\n\nĐăng nhập để:\n✅ Chat không giới hạn\n✅ Agent Mode không giới hạn\n✅ Lưu lịch sử & Memory`
           }]);
           fetchGuestLimits();
           setTimeout(() => setAuthModalOpen(true), 500);
         }
+        return;
       }
+
+      // Fallback: response không phải SSE (backend trả JSON lỗi khác) → xử lý JSON
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('text/event-stream')) {
+        if (res.ok) {
+          const aiMsg = await res.json();
+          setMessages(prev => [...prev.filter(m => m.ma_tin_nhan !== tempUserMsg.ma_tin_nhan), tempUserMsg, aiMsg]);
+          fetchConversations();
+          if (!currentUser) fetchGuestLimits();
+        } else {
+          setMessages(prev => [...prev.filter(m => m.ma_tin_nhan !== tempUserMsg.ma_tin_nhan), tempUserMsg, {
+            ma_tin_nhan: Date.now().toString(), vai_tro: 'assistant',
+            noi_dung: `⚠️ Lỗi Server (${res.status}). Hãy kiểm tra Backend đã chạy chưa và API Key trong mục Cài Đặt!`
+          }]);
+        }
+        return;
+      }
+
+      // ---- Đọc SSE stream: hiển thị token theo thời gian thực ----
+      streamStarted = true;
+      let aiText = '';
+      let finalMaTinNhan = streamMsgId;
+      setMessages(prev => [...prev.filter(m => m.ma_tin_nhan !== tempUserMsg.ma_tin_nhan), tempUserMsg, { ma_tin_nhan: streamMsgId, vai_tro: 'assistant', noi_dung: '' }]);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = '';
+      const updateAI = (t) => setMessages(prev => prev.map(m => m.ma_tin_nhan === streamMsgId ? { ...m, noi_dung: t } : m));
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        sseBuffer += decoder.decode(value, { stream: true });
+        const events = sseBuffer.split('\n\n');
+        sseBuffer = events.pop();
+        for (const evt of events) {
+          const line = evt.trim();
+          if (!line.startsWith('data: ')) continue;
+          let payload;
+          try { payload = JSON.parse(line.slice(6)); } catch (e) { continue; }
+          if (payload.type === 'token') { aiText += payload.text; updateAI(aiText); }
+          else if (payload.type === 'status') { if (!aiText) updateAI(payload.message); }
+          else if (payload.type === 'error') { aiText = payload.message; updateAI(aiText); }
+          else if (payload.type === 'done') { finalMaTinNhan = payload.ma_tin_nhan || finalMaTinNhan; if (payload.noi_dung) { aiText = payload.noi_dung; updateAI(aiText); } }
+        }
+      }
+
+      // Cập nhật ma_tin_nhan cuối (khớp DB) + làm sạch thông báo lỗi hệ thống
+      setMessages(prev => prev.map(m => {
+        if (m.ma_tin_nhan !== streamMsgId) return m;
+        let finalText = aiText;
+        if (finalText && (finalText.includes('The filename, directory name') || finalText.includes('syntax is incorrect'))) {
+          finalText = `Xin chào **${currentUser?.ten_day_du || 'USER'}**! Tôi là **AI Rexi Assistant**.\n\nHệ thống đã sẵn sàng 100% với bộ **35+ Skills Agent**, Quản Lý Files Workspace, Live IPTV & Remote Desktop Control. Bạn muốn tôi làm gì giúp bạn?`;
+        }
+        return { ...m, ma_tin_nhan: finalMaTinNhan, noi_dung: finalText };
+      }));
+      fetchConversations();
+      if (!currentUser) fetchGuestLimits();
     } catch (e) {
-      setMessages(prev => [...prev, {
-        ma_tin_nhan: Date.now().toString(),
-        vai_tro: 'assistant',
-        noi_dung: `⚠️ Không thể kết nối tới Server Backend (localhost:5000). Hãy kiểm tra Backend đã chạy chưa và API Key trong mục Cài Đặt!`
-      }]);
+      if (streamStarted) {
+        setMessages(prev => prev.map(m => m.ma_tin_nhan === streamMsgId ? { ...m, noi_dung: (m.noi_dung || '') + '\n\n⚠️ Kết nối stream bị ngắt.' } : m));
+      } else {
+        setMessages(prev => [...prev, {
+          ma_tin_nhan: Date.now().toString(),
+          vai_tro: 'assistant',
+          noi_dung: `⚠️ Không thể kết nối tới Server Backend. Hãy kiểm tra Backend đã chạy chưa và API Key trong mục Cài Đặt!`
+        }]);
+      }
     } finally {
       setLoading(false);
     }
@@ -630,11 +744,12 @@ noi_dung: isAgentLimit
     if (!selectedFile) return;
     setSavingFile(true);
     try {
-      await apiFetch(`${API_BASE}/workspace/file-content`, {
+      const response = await apiFetch(`${API_BASE}/workspace/file-content`, {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: selectedFile, content: fileContent })
       });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       alert('Đã lưu tệp tin thành công!');
     } catch (e) { alert('Lỗi lưu file: ' + e.message); }
     finally { setSavingFile(false); }
@@ -756,7 +871,7 @@ noi_dung: isAgentLimit
         setSkillsOpen={setSkillsOpen} setSuperToolsOpen={setSuperToolsOpen}
         currentUser={currentUser} setCurrentUser={setCurrentUser} setAuthToken={setAuthToken}
         setAuthModalOpen={setAuthModalOpen} setSettingsOpen={setSettingsOpen} setAdminOpen={setAdminOpen}
-        apiFetch={apiFetch} API_BASE={API_BASE} showToast={showToast}
+        apiFetch={apiFetch} API_BASE={API_BASE} showToast={showToast} setConversations={setConversations}
       />
 
       {/* ═══════════════════ MAIN WORKSPACE AREA ═══════════════════ */}
@@ -811,9 +926,9 @@ noi_dung: isAgentLimit
                 }}
                 className="bg-[#131417] text-[11px] font-medium text-cyan-300 border border-cyan-500/30 rounded-xl px-2.5 py-1.5 outline-none cursor-pointer hover:border-cyan-400 transition-all shrink-0 max-w-[150px] sm:max-w-none"
               >
-                {POPULAR_MODELS.map(m => (
+                {(availableModels.length > 0 ? availableModels : POPULAR_MODELS).map(m => (
                   <option key={m.id} value={m.id} className="bg-[#1e1f20] text-slate-200">
-                    {m.name} ({m.label})
+                    {m.name}{m.label ? ` (${m.label})` : m.type ? ` [${m.type}]` : ''}
                   </option>
                 ))}
               </select>
@@ -964,6 +1079,21 @@ noi_dung: isAgentLimit
                 )}
               </div>
             </div>
+          )}
+
+          {/* TAB 6: BROWSER AGENT (Playwright + Stagehand) */}
+          {activeTab === 'browser' && (
+            <BrowserView token={authToken} currentUser={currentUser} onClose={() => setActiveTab('chat')} />
+          )}
+
+          {/* TAB 7: WEB ANALYZER (Agent Phân Tích Web) */}
+          {activeTab === 'webanalyze' && (
+            <WebAnalyzer apiFetch={apiFetch} showToast={showToast} />
+          )}
+
+          {/* TAB 8: ADMIN PANEL */}
+          {activeTab === 'admin' && currentUser?.phan_quyen === 'admin' && (
+            <AdminPanel token={authToken} currentUser={currentUser} onClose={() => setActiveTab('chat')} />
           )}
 
         </div>
@@ -1148,78 +1278,78 @@ noi_dung: isAgentLimit
               </div>
             ) : (
               <div className="auth-login-wrapper">
-              <div className="flex flex-col items-center pt-2 pb-2">
-              <img src="/rexi_cat_icon.png" alt="Logo" className="rexi-logo w-12 h-12 object-contain" />
-              <span className="text-xs text-white/50 font-semibold tracking-widest mt-1">AI Rexi</span>
-            </div>
-
-            <div className="flex bg-[#1e1f28] rounded-xl p-1 mb-5">
-              <button
-                onClick={() => setAuthMode('login')}
-                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
-                  authMode === 'login' ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Đăng Nhập
-              </button>
-              <button
-                onClick={() => setAuthMode('register')}
-                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
-                  authMode === 'register' ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Đăng Ký
-             </button>
-            </div>
-
-            <form onSubmit={(e) => { e.preventDefault(); handleAuthSubmit(); }} className="space-y-3 text-xs">
-              {authMode === 'register' && (
-                <div>
-                  <label className="block text-slate-400 font-medium mb-1">Họ và Tên</label>
-                  <input type="text" value={authFullName} onChange={e => setAuthFullName(e.target.value)} placeholder="Nguyễn Văn A" className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none" />
+                <div className="flex flex-col items-center pt-2 pb-2">
+                  <img src="/rexi_cat_icon.png" alt="Logo" className="rexi-logo w-12 h-12 object-contain" />
+                  <span className="text-xs text-white/50 font-semibold tracking-widest mt-1">AI Rexi</span>
                 </div>
-              )}
-              <div>
-                <label className="block text-slate-400 font-medium mb-1">Tài Khoản</label>
-                <input type="text" required value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="Nhập tài khoản" className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none" />
-              </div>
-              <div>
-                <label className="block text-slate-400 font-medium mb-1">Mật Khẩu</label>
-                <div className="relative">
-                  <input type={showPassword ? 'text' : 'password'} required value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="••••••••" className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none pr-10" />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+
+                <div className="flex bg-[#1e1f28] rounded-xl p-1 mb-5">
+                  <button
+                    onClick={() => setAuthMode('login')}
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                      authMode === 'login' ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Đăng Nhập
+                  </button>
+                  <button
+                    onClick={() => setAuthMode('register')}
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                      authMode === 'register' ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Đăng Ký
                   </button>
                 </div>
-              </div>
 
-              <div className="flex justify-end mt-1">
-                <button type="button" onClick={() => { setForgotStep('request'); setForgotMessage(''); }} className="text-[10px] text-slate-500 hover:text-cyan-400 transition-colors">
-                  Quên Mật Khẩu?
+                <form onSubmit={(e) => { e.preventDefault(); handleAuthSubmit(); }} className="space-y-3 text-xs">
+                  {authMode === 'register' && (
+                    <div>
+                      <label className="block text-slate-400 font-medium mb-1">Họ và Tên</label>
+                      <input type="text" value={authFullName} onChange={e => setAuthFullName(e.target.value)} placeholder="Nguyễn Văn A" className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none" />
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-slate-400 font-medium mb-1">Tài Khoản</label>
+                    <input type="text" required value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="Nhập tài khoản" className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-medium mb-1">Mật Khẩu</label>
+                    <div className="relative">
+                      <input type={showPassword ? 'text' : 'password'} required value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="••••••••" className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none pr-10" />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end mt-1">
+                    <button type="button" onClick={() => { setForgotStep('request'); setForgotMessage(''); }} className="text-[10px] text-slate-500 hover:text-cyan-400 transition-colors">
+                      Quên Mật Khẩu?
+                    </button>
+                  </div>
+
+                  <button type="submit" className="w-full py-3 mt-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs shadow-lg shadow-cyan-500/25 transition-all">
+                    {authMode === 'login' ? 'Đăng Nhập' : 'Đăng Ký'}
+                  </button>
+                </form>
+
+                <div className="relative flex items-center my-4">
+                  <div className="flex-1 h-px bg-white/5"></div>
+                  <span className="px-3 text-[10px] text-slate-500 font-medium">hoặc</span>
+                  <div className="flex-1 h-px bg-white/5"></div>
+                </div>
+
+                <button type="button" onClick={() => alert('Đăng nhập Google chưa được cấu hình. Vui lòng dùng tài khoản và mật khẩu.')} className="w-full py-2.5 rounded-xl bg-[#242530] hover:bg-[#2a2b38] text-white text-xs font-medium flex items-center justify-center gap-2 border border-white/5 transition-all">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                  </svg>
+                  Đăng nhập với Google
                 </button>
-              </div>
-
-              <button type="submit" className="w-full py-3 mt-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs shadow-lg shadow-cyan-500/25 transition-all">
-                {authMode === 'login' ? 'Đăng Nhập' : 'Đăng Ký'}
-              </button>
-            </form>
-
-            <div className="relative flex items-center my-4">
-              <div className="flex-1 h-px bg-white/5"></div>
-              <span className="px-3 text-[10px] text-slate-500 font-medium">hoặc</span>
-              <div className="flex-1 h-px bg-white/5"></div>
-            </div>
-
-             <button type="button" className="w-full py-2.5 rounded-xl bg-[#242530] hover:bg-[#2a2b38] text-white text-xs font-medium flex items-center justify-center gap-2 border border-white/5 transition-all">
-               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
-                 <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                 <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-               </svg>
-               Đăng nhập với Google
-             </button>
               </div>
             )}
           </div>
@@ -1228,81 +1358,104 @@ noi_dung: isAgentLimit
 
 
       {/* ═══════════════════ SETTINGS MODAL ═══════════════════ */}
-      {settingsOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#181920] border border-white/10 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/5 pb-3">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Settings className="text-cyan-400" size={18} /> Cài Đặt Hệ Thống AI Rexi
-              </h3>
-              <button onClick={() => setSettingsOpen(false)} className="text-slate-400 hover:text-white"><X size={18} /></button>
-            </div>
+      <SettingsModal
+        settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen}
+        provider={provider} setProvider={setProvider}
+        modelName={modelName} setModelName={setModelName}
+        apiKey={apiKey} setApiKey={setApiKey}
+        baseUrl={baseUrl} setBaseUrl={setBaseUrl}
+      />
 
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-400 font-medium mb-1">Nhà Cung Cấp (Provider)</label>
-                <select
-                  value={provider}
-                  onChange={e => {
-                    setProvider(e.target.value);
-                    localStorage.setItem('rexi_provider', e.target.value);
-                  }}
-                  className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none"
-                >
-                  {Object.entries(PROVIDERS).map(([key, val]) => (
-                    <option key={key} value={key}>{val.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 font-medium mb-1">API Key</label>
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={e => {
-                    setApiKey(e.target.value);
-                    localStorage.setItem('rexi_api_key', e.target.value);
-                  }}
-                  placeholder={PROVIDERS[provider]?.placeholder || 'Nhập API Key của bạn...'}
-                  className="w-full bg-[#131417] border border-white/10 rounded-xl p-2.5 text-slate-200 outline-none"
-                />
-              </div>
-            </div>
-
-            <button onClick={() => setSettingsOpen(false)} className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-white font-medium text-xs shadow-md transition-all">Lưu Cấu Hình</button>
-          </div>
-        </div>
+      {/* ═══════════════════ FLOATING SPEED DIAL MENU (Góc dưới bên phải) ═══════════════════ */}
+      {/* Overlay click outside để tự thu lại menu khi bấm ra ngoài */}
+      {fabOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px] transition-opacity duration-300"
+          onClick={() => setFabOpen(false)}
+        />
       )}
 
-      {/* ═══════════════════ FLOATING RIGHT SIDEBAR (Only visible on wide screens xl+) ═══════════════════ */}
-      <div className="hidden xl:flex fixed right-3 top-1/2 -translate-y-1/2 z-30 flex-col gap-2 bg-[#1e1f20]/90 backdrop-blur-md border border-white/10 rounded-2xl p-1.5 shadow-2xl">
-        {[
-          { tab: 'chat', icon: <MessageSquare size={18} />, label: 'Chat' },
-          { tab: 'code', icon: <Code size={18} />, label: 'Code' },
-          { tab: 'files', icon: <Folder size={18} />, label: 'Files' },
-          { tab: 'iptv', icon: <Tv size={18} />, label: 'TV' },
-          { tab: 'desktop', icon: <Monitor size={18} />, label: 'Remote' },
-        ].map(item => (
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+        {/* Danh sách các công cụ hiện lên khi bấm mở (Có hỗ trợ cuộn nếu có nhiều tính năng) */}
+        <div className={`
+          flex flex-col gap-2 p-2 bg-[#181922]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl transition-all duration-300 origin-bottom-right
+          max-h-[70vh] overflow-y-auto pr-1.5 scrollbar-thin
+          ${fabOpen
+            ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto shadow-cyan-500/10'
+            : 'opacity-0 scale-75 translate-y-6 pointer-events-none'
+          }
+        `}>
+          {/* Nhóm Main Tabs */}
+          {[
+            { tab: 'chat', icon: <MessageSquare size={17} />, label: 'Chat AI', color: 'text-cyan-400' },
+            { tab: 'code', icon: <Code size={17} />, label: 'Editor & Preview', color: 'text-blue-400' },
+            { tab: 'files', icon: <Folder size={17} />, label: 'Workspace Files', color: 'text-amber-400' },
+            { tab: 'iptv', icon: <Tv size={17} />, label: 'IPTV Truyền Hình', color: 'text-rose-400' },
+            { tab: 'desktop', icon: <Monitor size={17} />, label: 'Remote Desktop', color: 'text-emerald-400' },
+            { tab: 'browser', icon: <Bot size={17} />, label: 'Browser Agent', color: 'text-purple-400' },
+            ...(currentUser?.phan_quyen === 'admin' ? [{ tab: 'admin', icon: <Shield size={17} />, label: 'Quản Trị Viên', color: 'text-amber-400' }] : []),
+          ].map(item => (
+            <button
+              key={item.tab}
+              onClick={() => {
+                handleSetActiveTab(item.tab);
+                setFabOpen(false); // Tự thu lại khi chọn
+              }}
+              className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+                activeTab === item.tab
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-md font-bold'
+                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <span className={item.color}>{item.icon}</span>
+              <span className="whitespace-nowrap">{item.label}</span>
+            </button>
+          ))}
+
+          {/* Đường phân cách */}
+          <div className="h-px bg-white/10 my-0.5 mx-2" />
+
+          {/* Nhóm Quick Tools (Modals) */}
           <button
-            key={item.tab}
-            onClick={() => { handleSetActiveTab(item.tab); }}
-            title={item.label}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
-              activeTab === item.tab
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-lg shadow-cyan-500/10'
-                : 'text-slate-400 hover:text-white hover:bg-white/10'
-            }`}
+            onClick={() => { setSkillsOpen(true); setFabOpen(false); }}
+            className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-purple-300 hover:text-white hover:bg-purple-500/20 transition-all"
           >
-            {item.icon}
+            <Layers size={17} className="text-purple-400" />
+            <span className="whitespace-nowrap">35+ Agent Skills</span>
           </button>
-        ))}
-      </div>
 
-      {/* Admin Panel Modal */}
-      {adminOpen && currentUser?.phan_quyen === 'admin' && (
-        <AdminPanel token={authToken} currentUser={currentUser} onClose={() => setAdminOpen(false)} />
-      )}
+          <button
+            onClick={() => { setSuperToolsOpen(true); setFabOpen(false); }}
+            className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-amber-300 hover:text-white hover:bg-amber-500/20 transition-all"
+          >
+            <Zap size={17} className="text-amber-400" />
+            <span className="whitespace-nowrap">Super Tools (CLI/Git)</span>
+          </button>
+
+          <button
+            onClick={() => { setSettingsOpen(true); setFabOpen(false); }}
+            className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-white/10 transition-all"
+          >
+            <Settings size={17} className="text-slate-400" />
+            <span className="whitespace-nowrap">Cài Đặt Hệ Thống</span>
+          </button>
+        </div>
+
+        {/* Nút FAB chính chỉ mũi tên lên/xuống kèm animation xoay */}
+        <button
+          onClick={() => setFabOpen(!fabOpen)}
+          className={`
+            w-13 h-13 p-3.5 rounded-2xl flex items-center justify-center shadow-2xl transition-all duration-300 active:scale-95
+            ${fabOpen
+              ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30 rotate-180'
+              : 'bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white shadow-cyan-500/30 hover:scale-105'
+            }
+          `}
+          title={fabOpen ? 'Thu gọn menu' : 'Mở thanh công cụ nhanh'}
+        >
+          <ChevronUp size={24} className={`transition-transform duration-300 ${fabOpen ? 'rotate-180' : ''}`} />
+        </button>
+      </div>
 
       {/* Toast Notification */}
       {toastMsg && (

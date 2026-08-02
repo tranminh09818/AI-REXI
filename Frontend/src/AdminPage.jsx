@@ -6,7 +6,8 @@ import {
   CheckCircle, XCircle, Crown, User as UserIcon
 } from 'lucide-react';
 
-const API_BASE = "http://localhost:5000/api";
+// const API_BASE = "http://localhost:5000/api";  // REMOVED — vite proxy handles /api/*
+const API_BASE = "/api";
 
 // ─── Helper: API call với token ───────────────────────────
 async function apiFetch(path, token, options = {}) {
@@ -112,6 +113,15 @@ export default function AdminPage() {
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
 
+  // AI Models Management State
+  const [providers, setProviders] = useState([]);
+  const [allModelsByProvider, setModelsByProvider] = useState({});
+  const [providersLoading, setProvidersLoading] = useState(false);
+  const [syncingProvider, setSyncingProvider] = useState(null);
+  const [newProviderName, setNewProviderName] = useState('');
+  const [newApiKey, setNewApiKey] = useState('');
+  const [aiModelsOpen, setAiModelsOpen] = useState(true);
+
   const showToast = (message, type = 'success') => setToast({ message, type });
 
   // ── Fetch Users ──────────────────────────────────────────
@@ -195,6 +205,93 @@ export default function AdminPage() {
     e.preventDefault();
     setSearch(searchInput);
     setPage(1);
+  };
+
+  // ── AI Models Functions ──────────────────────────────────
+  const fetchProviders = useCallback(async () => {
+    setProvidersLoading(true);
+    try {
+      const data = await apiFetch('/admin/providers', token);
+      if (data.success) setProviders(data.providers);
+    } catch (e) { showToast('Lỗi tải providers: ' + e.message, 'error'); }
+    finally { setProvidersLoading(false); }
+  }, [token]);
+
+  const fetchAdminModels = useCallback(async (prov) => {
+    try {
+      const url = prov ? `/admin/models?provider=${encodeURIComponent(prov)}` : '/admin/models';
+      const data = await apiFetch(url, token);
+      if (data.success && data.models) {
+        if (prov) {
+          setModelsByProvider(prev => ({...prev, [prov]: data.models}));
+        } else {
+          const grouped = {};
+          data.models.forEach(m => {
+            if (!grouped[m.ma_nha_cung_cap]) grouped[m.ma_nha_cung_cap] = [];
+            grouped[m.ma_nha_cung_cap].push(m);
+          });
+          setModelsByProvider(grouped);
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }, [token]);
+
+  const handleAddProvider = async () => {
+    if (!newProviderName.trim() || !newApiKey.trim()) return;
+    setSyncingProvider(newProviderName.trim());
+    try {
+      // Upsert provider
+      const provData = await apiFetch(`/admin/providers/${newProviderName.trim()}`, token, {
+        method: 'PUT',
+        body: JSON.stringify({ ten_hien_thi: newProviderName.trim(), base_url: '', can_api_key: 1, placeholder: 'API Key', thu_tu: 0, kich_hoat: 1 })
+      });
+      if (!provData.success) throw new Error(provData.error || 'Lỗi lưu provider');
+      // Sync models
+      const syncRes = await apiFetch('/admin/models/sync', token, {
+        method: 'POST',
+        body: JSON.stringify({ provider: newProviderName.trim(), api_key: newApiKey.trim() })
+      });
+      showToast(`Đã quét ${syncRes.count || 0} models từ ${newProviderName.trim()}`, 'success');
+      fetchProviders();
+      fetchAdminModels(newProviderName.trim());
+      setNewProviderName(''); setNewApiKey('');
+    } catch (e) { showToast('Lỗi: ' + e.message, 'error'); }
+    finally { setSyncingProvider(null); }
+  };
+
+  const handleSyncProvider = async (prov) => {
+    setSyncingProvider(prov);
+    try {
+      const syncRes = await apiFetch('/admin/models/sync', token, {
+        method: 'POST',
+        body: JSON.stringify({ provider: prov, api_key: '' })
+      });
+      showToast(`Đã quét models cho ${prov}`, syncRes.success ? 'success' : 'error');
+      fetchAdminModels(prov);
+    } catch (e) { showToast('Lỗi sync: ' + e.message, 'error'); }
+    finally { setSyncingProvider(null); }
+  };
+
+  const toggleModelOnHome = async (modelId, currentStatus) => {
+    try {
+      const data = await apiFetch(`/admin/models`, token, {
+        method: 'POST',
+        body: JSON.stringify({ ma_model: modelId, ma_nha_cung_cap: modelId.split('/')[0] || 'gemini', ten_hien_thi: modelId, kich_hoat: currentStatus ? 0 : 1 })
+      });
+      if (data.success) {
+        showToast(`Model ${currentStatus ? 'đã ẩn' : 'đã hiện'} trên trang chủ`, 'success');
+        // Refresh all providers
+        Object.keys(allModelsByProvider).forEach(p => fetchAdminModels(p));
+      }
+    } catch (e) { showToast('Lỗi: ' + e.message, 'error'); }
+  };
+
+  const deleteModel = async (modelId) => {
+    try {
+      await apiFetch(`/api/admin/models/${encodeURIComponent(modelId)}`, token, { method: 'DELETE' });
+      showToast('Đã xóa model', 'success');
+      Object.keys(allModelsByProvider).forEach(p => fetchAdminModels(p));
+    } catch (e) { showToast('Lỗi xóa: ' + e.message, 'error'); }
   };
 
   if (!token || !currentUser || currentUser.phan_quyen !== 'admin') {
@@ -446,6 +543,95 @@ export default function AdminPage() {
               )}
             </>
           )}
+        </div>
+
+        {/* AI MODELS MANAGEMENT */}
+        <div className="bg-[#181920] rounded-2xl border border-white/8 shadow overflow-hidden">
+          <div className="px-5 py-3 bg-white/5 border-b border-white/10 flex items-center justify-between gap-3">
+            <span className="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <Server size={15} className="text-cyan-400" /> Quản Lý AI Models
+            </span>
+            <button onClick={() => { fetchProviders(); Object.keys(allModelsByProvider).forEach(p => fetchAdminModels(p)); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-slate-300 hover:text-white transition-colors">
+              <RefreshCw size={13} /> Làm mới
+            </button>
+          </div>
+          <div className="p-5 space-y-5">
+            <div className="flex flex-wrap gap-3 items-end">
+              <div className="flex-1 min-w-[150px]">
+                <label className="block text-[10px] text-slate-500 mb-1 font-semibold uppercase">Provider</label>
+                <input type="text" value={newProviderName} onChange={e => setNewProviderName(e.target.value)}
+                  placeholder="gemini, openai, groq..."
+                  className="w-full px-3 py-2 bg-[#131417] border border-white/10 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50" />
+              </div>
+              <div className="flex-[2] min-w-[200px]">
+                <label className="block text-[10px] text-slate-500 mb-1 font-semibold uppercase">API Key</label>
+                <input type="text" value={newApiKey} onChange={e => setNewApiKey(e.target.value)}
+                  placeholder="Nhập API Key..."
+                  className="w-full px-3 py-2 bg-[#131417] border border-white/10 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50" />
+              </div>
+              <button onClick={handleAddProvider} disabled={!newProviderName.trim() || !newApiKey.trim() || syncingProvider}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5">
+                <Database size={13} /> {syncingProvider ? 'Đang quét...' : 'Lưu & Quét Model'}
+              </button>
+            </div>
+            <div id="ai-models-list">
+              {providersLoading ? (
+                <div className="text-center py-8 text-slate-500 text-xs">Đang tải providers...</div>
+              ) : (
+                <div className="space-y-4">
+                  {providers.map((p) => (
+                    <div key={p.ma_nha_cung_cap} className="bg-[#131417] rounded-xl border border-white/8 overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-2.5 bg-white/5 border-b border-white/8">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-cyan-300">{p.ten_hien_thi}</span>
+                          <span className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 text-[9px] font-mono">{p.ma_nha_cung_cap}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] ${p.kich_hoat ? 'bg-emerald-500/10 text-emerald-300' : 'bg-slate-500/10 text-slate-400'}`}>
+                            {p.kich_hoat ? 'Active' : 'Inactive'}
+                          </span>
+                        </div>
+                        <button onClick={() => handleSyncProvider(p.ma_nha_cung_cap)}
+                          disabled={syncingProvider === p.ma_nha_cung_cap}
+                          className="px-2.5 py-1.5 bg-purple-600/80 hover:bg-purple-500 disabled:opacity-40 text-white text-[10px] font-semibold rounded-lg transition-colors flex items-center gap-1">
+                          <RefreshCw size={11} className={syncingProvider === p.ma_nha_cung_cap ? 'animate-spin' : ''} />
+                          {syncingProvider === p.ma_nha_cung_cap ? 'Đang quét...' : 'Quét Model'}
+                        </button>
+                      </div>
+                      <div className="p-2 space-y-1">
+                        {(allModelsByProvider[p.ma_nha_cung_cap] || []).length === 0 ? (
+                          <div className="text-center py-4 text-slate-500 text-[10px]">Nhấn "Quét Model" để tải danh sách.</div>
+                        ) : (
+                          allModelsByProvider[p.ma_nha_cung_cap].map((model) => (
+                            <div key={model.ma_model} className="group flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5 transition-colors"
+                              title={`${model.ten_hien_thi}\nProvider: ${model.ma_nha_cung_cap}\nType: ${model.loai}\nUpdated: ${model.ngay_cap_nhat || 'N/A'}`}>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${model.kich_hoat ? 'bg-emerald-400' : 'bg-slate-600'}`}></span>
+                                <span className="text-xs text-slate-300 truncate">{model.ten_hien_thi}</span>
+                                <span className={`px-1 py-0.5 rounded text-[9px] font-medium ${model.loai === 'free' ? 'bg-emerald-500/15 text-emerald-300' : model.loai === 'paid' ? 'bg-amber-500/15 text-amber-300' : 'bg-rose-500/15 text-rose-300'}`}>
+                                  {model.loai === 'free' ? '✅ Free' : model.loai === 'paid' ? '💰 Paid' : '⚠️ Error'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => toggleModelOnHome(model.ma_model, model.kich_hoat)}
+                                  className="p-1.5 rounded-lg hover:bg-cyan-500/20 text-slate-400 hover:text-cyan-300 transition-colors" title={model.kich_hoat ? 'Ẩn khỏi trang chủ' : 'Hiện lên trang chủ'}>
+                                  <span className="text-xs">{model.kich_hoat ? '↓' : '↑'}</span>
+                                </button>
+                                <button onClick={() => deleteModel(model.ma_model)}
+                                  className="p-1.5 rounded-lg hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 transition-colors" title="Xóa model">✕</button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {providers.length === 0 && (
+                    <div className="text-center py-10 text-slate-500 text-xs">Chưa có provider. Nhập tên + key ở trên.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </main>
 

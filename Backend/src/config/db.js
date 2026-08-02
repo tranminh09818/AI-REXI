@@ -66,15 +66,41 @@ class SQLServerAdapter {
       } else {
         const sql = require('mssql/msnodesqlv8');
         this.mssql = sql;
-        const host = process.env.SQLSERVER_HOST || '.\\SQLEXPRESS';
-        const dbName = process.env.SQLSERVER_DB || 'AI REXI';
-        this.pool = await sql.connect({
-          connectionString: `Driver={ODBC Driver 17 for SQL Server};Server=${host};Database={${dbName}};Trusted_Connection=yes;`
-        });
-        log('SQL Server connected (Windows Auth)');
+        const hosts = [
+          process.env.SQLSERVER_HOST || '.\\SQLEXPRESS',
+          '(localdb)\\MSSQLLocalDB',
+          'localhost\\SQLEXPRESS',
+          'localhost'
+        ];
+        const dbNames = [process.env.SQLSERVER_DB || 'AI REXI', 'AI_REXI'];
+        let connected = false;
+        let lastErr = null;
+
+        for (const h of hosts) {
+          for (const d of dbNames) {
+            try {
+              this.pool = await sql.connect({
+                connectionString: `Driver={ODBC Driver 17 for SQL Server};Server=${h};Database={${d}};Trusted_Connection=yes;`
+              });
+              log(`SQL Server connected successfully to [${h}] database [${d}]`);
+              connected = true;
+              break;
+            } catch (e) {
+              lastErr = e;
+            }
+          }
+          if (connected) break;
+        }
+
+        if (!connected) {
+          throw lastErr || new Error('Không thể kết nối tới các instance SQL Server local.');
+        }
       }
     } catch (err) {
-      log('SQL Server failed: ' + err.message + ' — falling back to SQLite');
+      log('SQL Server connection failed: ' + err.message + ' — Auto-switching to SQLite adapter');
+      this.fallback = new SQLiteAdapter();
+      this.ready = true;
+      this._drain();
       return;
     }
     this._drain();
@@ -102,6 +128,12 @@ class SQLServerAdapter {
     return { req, sql: q };
   }
   _exec(sql, params, cb, mode) {
+    if (this.fallback) {
+      if (mode === 'get') this.fallback.get(sql, params, cb);
+      else if (mode === 'all') this.fallback.all(sql, params, cb);
+      else this.fallback.run(sql, params, cb);
+      return;
+    }
     if (!this.pool) { this.queue.push([sql, params, cb, mode]); return; }
     const { req, sql: q } = this._transform(sql, params);
     req.query(q).then(r => {

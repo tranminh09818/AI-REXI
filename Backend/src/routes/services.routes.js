@@ -5,7 +5,7 @@ const fs = require('fs');
 const { exec } = require('child_process');
 const db = require('../config/db');
 const { authMiddleware, adminMiddleware } = require('../middleware/auth.middleware');
-const Shell = require('node-powershell');
+const { Shell } = require('node-powershell');
 const multer = require('multer');
 const Groq = require('groq-sdk');
 
@@ -18,10 +18,19 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB max
 });
 
-// Khởi tạo Groq client (API key từ env hoặc settings)
-const getGroqClient = () => {
-  const key = process.env.GROQ_API_KEY;
-  if (!key || key === 'YOUR_GROQ_API_KEY_HERE') return null;
+// Khởi tạo Groq client (API key từ env hoặc DB bảng khoa_api)
+const getGroqClient = async () => {
+  let key = process.env.GROQ_API_KEY;
+  if (!key || key === 'YOUR_GROQ_API_KEY_HERE') {
+    key = await new Promise((resolve) => {
+      db.get("SELECT TOP 1 gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'groq'", [], (err, row) => {
+        console.log('[getGroqClient] db result err=', err ? err.message : null, 'row=', row ? row.gia_tri_khoa ? 'HAS_KEY' : 'EMPTY' : 'NONE');
+        if (err || !row || !row.gia_tri_khoa) return resolve(null);
+        resolve(row.gia_tri_khoa.trim());
+      });
+    });
+  }
+  if (!key) return null;
   return new Groq({ apiKey: key });
 };
 
@@ -505,7 +514,14 @@ router.get('/iptv/channels', async (req, res) => {
       }
     }
 
-    res.json({ success: true, count: channels.length, categories: availableCategories, channels });
+    const { search } = req.query;
+    let result = channels;
+    if (search && search.trim()) {
+      const q = search.toLowerCase().trim();
+      result = channels.filter(ch => ch.name.toLowerCase().includes(q));
+    }
+
+    res.json({ success: true, count: result.length, categories: availableCategories, channels: result });
   } catch (err) {
     res.json({ success: false, error: 'L\u1ed7i k\u1ebft n\u1ed1i IPTV: ' + (err.message || 'Timeout ho\u1eb7c server kh\u00f4ng ph\u1ea3n h\u1ed3i') });
   }
@@ -823,30 +839,30 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
 router.post('/transcribe', authMiddleware, upload.single('audio'), async (req, res) => {
   const audioFile = req.file;
-  const srcLang = req.body.lang || 'en';
+  const srcLang = req.body.lang || 'auto';
 
   if (!audioFile) {
     return res.status(400).json({ success: false, error: 'Không nhận được file audio.' });
   }
 
   try {
-    const groq = getGroqClient();
+    const groq = await getGroqClient();
     if (!groq) {
       // Fallback: Không có Groq key — báo lỗi rõ ràng
       fs.unlinkSync(audioFile.path);
       return res.status(503).json({
         success: false,
         error: 'CHƯA_CÓ_KEY',
-        message: 'Cần thêm GROQ_API_KEY vào file .env để dùng tính năng Phụ Đề AI. Lấy key miễn phí tại: https://console.groq.com'
+        message: 'Cần thêm GROQ_API_KEY vào file .env hoặc bảng khoa_api để dùng tính năng Phụ Đề AI. Lấy key miễn phí tại: https://console.groq.com'
       });
     }
 
     // Gọi Groq Whisper API để nhận diện giọng nói
+    // language = 'auto' -> Whisper tự phát hiện mọi ngôn ngữ
     const audioStream = fs.createReadStream(audioFile.path);
     const transcription = await groq.audio.transcriptions.create({
       file: audioStream,
       model: 'whisper-large-v3',
-      language: srcLang,
       response_format: 'text'
     });
 
@@ -859,10 +875,11 @@ router.post('/transcribe', authMiddleware, upload.single('audio'), async (req, r
     }
 
     // Dịch sang Tiếng Việt qua Google Translate (miễn phí, không cần key)
+    // sl=auto -> Google tự nhận diện ngôn ngữ nguồn, tl=vi -> dịch sang Việt
     let vietnameseText = originalText;
     try {
       const translateRes = await fetch(
-        `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${srcLang}&tl=vi&dt=t&q=${encodeURIComponent(originalText)}`,
+        `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${srcLang === 'auto' ? 'auto' : srcLang}&tl=vi&dt=t&q=${encodeURIComponent(originalText)}`,
         { signal: AbortSignal.timeout(5000) }
       );
       const translateData = await translateRes.json();
@@ -883,6 +900,82 @@ router.post('/transcribe', authMiddleware, upload.single('audio'), async (req, r
     console.error('[Transcribe] Error:', err.message);
     res.status(500).json({ success: false, error: 'Lỗi nhận diện giọng nói: ' + err.message });
   }
+});
+
+// ========== BROWSER STREAM ROUTES ==========
+const browserStream = require('../services/browserStream');
+
+router.post('/browser/launch', async (req, res) => {
+  try {
+    const { url } = req.body;
+    const result = await browserStream.launch({ url: url || 'about:blank' });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/browser/navigate', async (req, res) => {
+  try {
+    const { url } = req.body;
+    const result = await browserStream.navigate(url);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/browser/click', async (req, res) => {
+  try {
+    const { x, y } = req.body;
+    const result = await browserStream.click(x, y);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/browser/type', async (req, res) => {
+  try {
+    const { text } = req.body;
+    const result = await browserStream.type(text);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/browser/key', async (req, res) => {
+  try {
+    const { key } = req.body;
+    const result = await browserStream.key(key);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/browser/scroll', async (req, res) => {
+  try {
+    const { deltaX, deltaY } = req.body;
+    const result = await browserStream.scroll(deltaX, deltaY);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/browser/close', async (req, res) => {
+  try {
+    await browserStream.close();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.get('/browser/status', (req, res) => {
+  res.json(browserStream.getStatus());
 });
 
 module.exports = router;

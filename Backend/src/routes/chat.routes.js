@@ -728,20 +728,23 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
               }
             }
 
-          } else if (['openai', 'deepseek', 'groq', 'github', 'freellmapi', 'ollama', 'custom'].includes(selectedProvider)) {
+          } else if (['openai', 'deepseek', 'groq', 'github', 'freellmapi', 'ollama', 'custom', 'omniroute'].includes(selectedProvider)) {
             let endpoint = "https://api.openai.com/v1/chat/completions";
-            if (selectedProvider === 'deepseek') endpoint = "https://api.deepseek.com/chat/completions";
-            if (selectedProvider === 'groq') endpoint = "https://api.groq.com/openai/v1/chat/completions";
-            if (selectedProvider === 'github') endpoint = "https://models.github.ai/inference/chat/completions";
-            if (selectedProvider === 'freellmapi') {
+            if (selectedProvider === 'omniroute') {
+              const defaultOmni = process.env.OMNIROUTE_BASE_URL || "http://localhost:20128/v1";
+              const cleanedBase = (base_url || defaultOmni).replace(/\/+$/, '');
+              endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
+            } else if (selectedProvider === 'deepseek') endpoint = "https://api.deepseek.com/chat/completions";
+            else if (selectedProvider === 'groq') endpoint = "https://api.groq.com/openai/v1/chat/completions";
+            else if (selectedProvider === 'github') endpoint = "https://models.github.ai/inference/chat/completions";
+            else if (selectedProvider === 'freellmapi') {
               const cleanedBase = (base_url || "http://localhost:8080/v1").replace(/\/+$/, '');
               endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-            }
-            if (selectedProvider === 'ollama') endpoint = (base_url || "http://localhost:11434") + "/v1/chat/completions";
-            if (selectedProvider === 'custom') {
+            } else if (selectedProvider === 'ollama') endpoint = (base_url || "http://localhost:11434") + "/v1/chat/completions";
+            else if (selectedProvider === 'custom') {
               const cleanedBase = (base_url || "https://openrouter.ai/api/v1").replace(/\/+$/, '');
               endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-            } else if (base_url && !['ollama', 'freellmapi'].includes(selectedProvider)) {
+            } else if (base_url && !['ollama', 'freellmapi', 'omniroute'].includes(selectedProvider)) {
               endpoint = base_url + "/chat/completions";
             }
 

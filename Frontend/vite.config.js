@@ -10,5 +10,18 @@ export default defineConfig({
   ],
   server: {
     historyApiFallback: true,
+    watch: {
+      ignored: ['**/node_modules/**', '**/.git/**', '**/dist/**']
+    },
+    hmr: {
+      overlay: false
+    },
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        ws: true,
+      },
+    },
   },
 })

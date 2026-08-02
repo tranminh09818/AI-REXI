@@ -1,13 +1,18 @@
-import React, { useState } from 'react';
-import { X, Settings, Eye, EyeOff } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Settings, Eye, EyeOff, RefreshCw, Zap, Globe } from 'lucide-react';
 
-const PROVIDERS = {
+const FALLBACK_PROVIDERS = {
   gemini: { name: 'Google Gemini', placeholder: 'AIzaSy...' },
-  openai: { name: 'OpenAI GPT-4o', placeholder: 'sk-proj-...' },
-  claude: { name: 'Anthropic Claude', placeholder: 'sk-ant-...' },
-  deepseek: { name: 'DeepSeek AI', placeholder: 'sk-...' },
-  groq: { name: 'Groq Cloud', placeholder: 'gsk_...' },
-  opencode: { name: 'OpenCode Agent', placeholder: 'Internal Engine' },
+  omniroute: { name: '🌐 OmniRoute Gateway (290+ Providers)', placeholder: 'http://localhost:20128/v1 (No key needed)', defaultBaseUrl: 'http://localhost:20128/v1' },
+  openai: { name: 'OpenAI GPT-4o / O3', placeholder: 'sk-proj-...' },
+  claude: { name: 'Anthropic Claude 3.5', placeholder: 'sk-ant-...' },
+  deepseek: { name: 'DeepSeek AI (V3/R1)', placeholder: 'sk-...' },
+  groq: { name: 'Groq Cloud (Fast Llama)', placeholder: 'gsk_...' },
+  github: { name: 'GitHub Models (Free)', placeholder: 'ghp_...' },
+  opencode: { name: 'OpenCode Agent Engine', placeholder: 'Internal Engine' },
+  ollama: { name: 'Ollama Local AI', placeholder: 'http://localhost:11434', defaultBaseUrl: 'http://localhost:11434' },
+  freellmapi: { name: 'Free LLM API Gateway', placeholder: 'http://localhost:8080/v1', defaultBaseUrl: 'http://localhost:8080/v1' },
+  custom: { name: 'Custom Endpoint / OpenRouter', placeholder: 'sk-or-v1-...', defaultBaseUrl: 'https://openrouter.ai/api/v1' }
 };
 
 export default function SettingsModal({
@@ -16,36 +21,130 @@ export default function SettingsModal({
   apiKey, setApiKey, baseUrl, setBaseUrl
 }) {
   const [showApiKey, setShowApiKey] = useState(false);
+  const [dynamicProviders, setDynamicProviders] = useState([]);
+  const [loadingProviders, setLoadingProviders] = useState(false);
+  const [isOmniRouteActive, setIsOmniRouteActive] = useState(false);
+
+  // Fetch danh sách Nhà Cung Cấp động từ API khi mở Modal
+  useEffect(() => {
+    if (settingsOpen) {
+      fetchProviders();
+    }
+  }, [settingsOpen]);
+
+  const fetchProviders = async () => {
+    setLoadingProviders(true);
+    try {
+      const res = await fetch('/api/models/providers');
+      const data = await res.json();
+      if (data.success && Array.isArray(data.providers)) {
+        setDynamicProviders(data.providers);
+        setIsOmniRouteActive(!!data.isOmniRouteActive);
+      }
+    } catch (e) {
+      console.warn('Load providers failed, fallback static:', e.message);
+    } finally {
+      setLoadingProviders(false);
+    }
+  };
+
+  const handleProviderChange = (newProv) => {
+    setProvider(newProv);
+    localStorage.setItem('rexi_provider', newProv);
+
+    // Tự động điền Base URL và Model gợi ý chuẩn cho OmniRoute / Custom / Ollama
+    if (newProv === 'omniroute') {
+      const omniUrl = 'http://localhost:20128/v1';
+      setBaseUrl(omniUrl);
+      localStorage.setItem('rexi_base_url', omniUrl);
+    } else if (newProv === 'ollama' && !baseUrl) {
+      setBaseUrl('http://localhost:11434');
+      localStorage.setItem('rexi_base_url', 'http://localhost:11434');
+    } else if (newProv === 'custom' && !baseUrl) {
+      setBaseUrl('https://openrouter.ai/api/v1');
+      localStorage.setItem('rexi_base_url', 'https://openrouter.ai/api/v1');
+    }
+  };
+
   if (!settingsOpen) return null;
+
+  const providerList = dynamicProviders.length > 0
+    ? dynamicProviders.map(p => ({ key: p.ma_nha_cung_cap, name: p.ten_hien_thi, placeholder: p.placeholder, canKey: p.can_api_key }))
+    : Object.entries(FALLBACK_PROVIDERS).map(([k, v]) => ({ key: k, name: v.name, placeholder: v.placeholder, canKey: v.placeholder !== 'Internal Engine' }));
+
+  const currentInfo = FALLBACK_PROVIDERS[provider] || {};
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setSettingsOpen(false)}>
-      <div className="bg-[#1a1b24] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
+      <div className="bg-[#1a1b24] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-white/5 pb-3">
           <h2 className="text-base font-bold text-white flex items-center gap-2">
-            <Settings size={16} className="text-cyan-400" /> Cài Đặt Hệ Thống AI Rexi
+            <Settings size={18} className="text-cyan-400" /> Cài Đặt Hệ Thống AI Rexi
           </h2>
-          <button onClick={() => setSettingsOpen(false)} className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"><X size={16} /></button>
+          <div className="flex items-center gap-2">
+            <button onClick={fetchProviders} title="Tải lại danh sách Provider" className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white">
+              <RefreshCw size={14} className={loadingProviders ? 'animate-spin text-cyan-400' : ''} />
+            </button>
+            <button onClick={() => setSettingsOpen(false)} className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"><X size={16} /></button>
+          </div>
         </div>
+
+        {/* OmniRoute Detection Status Badge */}
+        {isOmniRouteActive && (
+          <div className="p-2.5 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center justify-between">
+            <span className="flex items-center gap-1.5 font-medium">
+              <Globe size={14} className="text-emerald-400 animate-pulse" /> Đã phát hiện OmniRoute Gateway đang bật!
+            </span>
+            <button
+              onClick={() => handleProviderChange('omniroute')}
+              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] rounded-lg"
+            >
+              Dùng OmniRoute
+            </button>
+          </div>
+        )}
+
         <div className="space-y-4">
           <div>
-            <label className="text-xs font-medium text-slate-400 mb-1 block">Nhà cung cấp AI</label>
-            <select value={provider} onChange={e => { setProvider(e.target.value); localStorage.setItem('rexi_provider', e.target.value); }}
-              className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white outline-none focus:border-cyan-500/50">
-              {Object.entries(PROVIDERS).map(([key, val]) => <option key={key} value={key}>{val.name}</option>)}
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-slate-400">Nhà cung cấp AI (Tự động cập nhật)</label>
+              {loadingProviders && <span className="text-[10px] text-cyan-400 animate-pulse">Đang cập nhật...</span>}
+            </div>
+            <select
+              value={provider}
+              onChange={e => handleProviderChange(e.target.value)}
+              className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white outline-none focus:border-cyan-500/50 cursor-pointer"
+            >
+              {providerList.map(p => (
+                <option key={p.key} value={p.key} className="bg-[#1e1f20] text-slate-200">
+                  {p.name}
+                </option>
+              ))}
             </select>
           </div>
+
           <div>
-            <label className="text-xs font-medium text-slate-400 mb-1 block">Model</label>
-            <input type="text" value={modelName} onChange={e => { setModelName(e.target.value); localStorage.setItem('rexi_model', e.target.value); }}
-              className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
+            <label className="text-xs font-medium text-slate-400 mb-1 block">Model AI (Mô hình)</label>
+            <input
+              type="text"
+              value={modelName}
+              onChange={e => { setModelName(e.target.value); localStorage.setItem('rexi_model', e.target.value); }}
+              placeholder="vd: gemini-3.6-flash, gpt-4o, claude-3-5-sonnet..."
+              className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50 font-mono"
+            />
           </div>
-          {PROVIDERS[provider]?.placeholder !== 'Internal Engine' && (
+
+          {provider !== 'opencode' && provider !== 'omniroute' && provider !== 'ollama' && (
             <div>
               <label className="text-xs font-medium text-slate-400 mb-1 block">API Key</label>
               <div className="relative">
-                <input type={showApiKey ? 'text' : 'password'} value={apiKey} onChange={e => { setApiKey(e.target.value); localStorage.setItem('rexi_api_key', e.target.value); }}
-                  placeholder={PROVIDERS[provider]?.placeholder}
-                  className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50 pr-10" />
+                <input
+                  type={showApiKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={e => { setApiKey(e.target.value); localStorage.setItem('rexi_api_key', e.target.value); }}
+                  placeholder={currentInfo.placeholder || 'Nhập API Key...'}
+                  className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50 pr-10"
+                />
                 <button type="button" onClick={() => setShowApiKey(!showApiKey)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
                   {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -53,18 +152,27 @@ export default function SettingsModal({
               </div>
             </div>
           )}
+
           <div>
-            <label className="text-xs font-medium text-slate-400 mb-1 block">Base URL (tùy chọn)</label>
-            <input type="text" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); localStorage.setItem('rexi_base_url', e.target.value); }}
-              placeholder="https://api.openai.com/v1"
-              className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
+            <label className="text-xs font-medium text-slate-400 mb-1 block">Base URL Endpoint (Địa chỉ API)</label>
+            <input
+              type="text"
+              value={baseUrl}
+              onChange={e => { setBaseUrl(e.target.value); localStorage.setItem('rexi_base_url', e.target.value); }}
+              placeholder={provider === 'omniroute' ? 'http://localhost:20128/v1' : 'https://api.openai.com/v1'}
+              className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50 font-mono"
+            />
           </div>
-          <button onClick={() => setSettingsOpen(false)}
-            className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95">
-            Lưu Cài Đặt
+
+          <button
+            onClick={() => setSettingsOpen(false)}
+            className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-sm rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-1.5"
+          >
+            <Zap size={15} /> Lưu Cài Đặt
           </button>
         </div>
       </div>
     </div>
   );
 }
+

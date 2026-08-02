@@ -13,6 +13,7 @@ const chatRoutes = require('./src/routes/chat.routes');
 const servicesRoutes = require('./src/routes/services.routes');
 const modelsRoutes = require('./src/routes/models.routes');
 const workspaceRoutes = require('./src/routes/workspace.routes');
+const agentRoutes = require('./src/routes/agent.routes');
 const { rateLimitMiddleware } = require('./src/middleware/rateLimit.middleware');
 
 const { ensureAdmin, ensureGuestUser } = require('./src/ensure-admin');
@@ -82,6 +83,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/services', servicesRoutes);
 app.use('/api/models', modelsRoutes);
 app.use('/api/workspace', workspaceRoutes);
+app.use('/api/agent', agentRoutes);
 app.use('/api/admin', adminRoutes);
 
 // (Tùy chọn) Phục vụ ứng dụng React đã build cho môi trường production

@@ -1,0 +1,7 @@
+﻿C:\Users\84916\.opencode\bin\opencode.exe : [0m
+    + CategoryInfo          : NotSpecified: ([0m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> build ┬╖ deepseek-v4-flash-free
+[0m
+Chao ban! Toi san sang tro giup ban ΓÇö ban can gi?

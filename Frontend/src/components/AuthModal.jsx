@@ -33,7 +33,7 @@ export default function AuthModal({
                 {forgotMsg && <p className="text-xs text-emerald-400">{forgotMsg}</p>}
                 <button onClick={async () => {
                   try {
-                    const res = await fetch('http://localhost:5000/api/auth/forgot-password', {
+                    const res = await fetch('/api/auth/forgot-password', {
                       method: 'POST', headers: {'Content-Type': 'application/json'},
                       body: JSON.stringify({ email: forgotEmail })
                     });
@@ -53,7 +53,7 @@ export default function AuthModal({
                   placeholder="Mật khẩu mới" className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
                 <button onClick={async () => {
                   try {
-                    const res = await fetch('http://localhost:5000/api/auth/reset-password', {
+                    const res = await fetch('/api/auth/reset-password', {
                       method: 'POST', headers: {'Content-Type': 'application/json'},
                       body: JSON.stringify({ email: forgotEmail, otp_code: otpCode, new_password: newPassword })
                     });

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Menu, Plus, MessageSquare, Code, Folder, Tv, Monitor,
   Layers, Zap, Search, Trash2, ChevronDown, FolderOpen,
-  User, Settings, LogOut, Headphones, Shield
+  User, Settings, LogOut, Headphones, Shield, Bot, Globe
 } from 'lucide-react';
 
 const RexiLogo = ({ className = "w-8 h-8" }) => (
@@ -18,7 +18,7 @@ export default function Sidebar({
   filesDrawerOpen, setFilesDrawerOpen, renderTree, fileTree,
   setSkillsOpen, setSuperToolsOpen,
   currentUser, setCurrentUser, setAuthToken, setAuthModalOpen, setSettingsOpen, setAdminOpen,
-  apiFetch, API_BASE, showToast
+  apiFetch, API_BASE, showToast, setConversations
 }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
@@ -73,7 +73,7 @@ export default function Sidebar({
       showToast('Chức năng này chỉ dành cho Quản trị viên. Bạn không có quyền truy cập.', 'error');
       return;
     }
-    setAdminOpen(true);
+    setActiveTab('admin');
   };
 
   return (
@@ -112,24 +112,7 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* Tab Switcher */}
-      <div className="grid grid-cols-5 gap-1 p-1.5 mx-3 bg-[#131417] rounded-xl border border-white/5 text-[11px] font-medium">
-        {[
-          { id: 'chat', icon: MessageSquare, label: 'Chat' },
-          { id: 'code', icon: Code, label: 'Code' },
-          { id: 'files', icon: Folder, label: 'Files' },
-          { id: 'iptv', icon: Tv, label: 'TV' },
-          { id: 'desktop', icon: Monitor, label: 'Remote' },
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`py-1.5 rounded-lg flex flex-col items-center gap-0.5 transition-all ${activeTab === tab.id ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}
-          >
-            <tab.icon size={13} /> {tab.label}
-          </button>
-        ))}
-      </div>
+
 
       {/* Skills & Super Tools Buttons */}
       <div className="grid grid-cols-2 gap-2 px-3 mt-2">
@@ -144,6 +127,16 @@ export default function Sidebar({
           className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-amber-900/30 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-medium transition-all"
         >
           <Zap size={14} /> Super Tools
+        </button>
+        <button
+          onClick={() => setActiveTab('webanalyze')}
+          className={`flex items-center justify-center gap-1.5 p-2 rounded-xl border text-xs font-medium transition-all ${
+            activeTab === 'webanalyze'
+              ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300'
+              : 'bg-cyan-900/30 border-cyan-500/30 text-cyan-300 hover:text-white'
+          }`}
+        >
+          <Globe size={14} /> Web Analyze
         </button>
       </div>
 

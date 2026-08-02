@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Tv, Globe, Play, Radio, GripVertical } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Tv, Globe, Play, Radio, Search } from 'lucide-react';
+import { ALL_IPTV_COUNTRIES } from '../data/iptvCountries.js';
 
 const IPTV_CATEGORIES = [
   { id: 'news', name: '📰 Tin Tức 24/7' },
@@ -8,20 +9,38 @@ const IPTV_CATEGORIES = [
   { id: 'sports', name: '⚽ Thể Thao Live' },
   { id: 'entertainment', name: '🎭 Giải Trí' },
   { id: 'music', name: '🎵 Âm Nhạc' },
+  { id: 'documentary', name: '🎬 Tài Liệu' },
+  { id: 'kids', name: '🧸 Thiếu Nhi' },
+  { id: 'general', name: '📡 Tổng Hợp' },
+  { id: 'education', name: '📚 Giáo Dục' },
+  { id: 'religion', name: '🕌 Tôn Giáo' },
+  { id: 'science', name: '🔬 Khoa Học' },
+  { id: 'business', name: '💼 Kinh Doanh' },
+  { id: 'shop', name: '🛒 Mua Sắm' },
 ];
 
-const IPTV_COUNTRIES = [
-  { id: 'VN', name: '🇻🇳 Việt Nam' },
-  { id: 'US', name: '🇺🇸 United States' },
-  { id: 'GB', name: '🇬🇧 United Kingdom' },
-  { id: 'KR', name: '🇰🇷 South Korea' },
-  { id: 'JP', name: '🇯🇵 Japan' },
-  { id: 'CN', name: '🇨🇳 China' },
-  { id: 'TH', name: '🇹🇭 Thailand' },
-  { id: 'FR', name: '🇫🇷 France' },
-  { id: 'DE', name: '🇩🇪 Germany' },
-  { id: 'IN', name: '🇮🇳 India' },
-];
+const POPULAR_COUNTRIES = ['VN', 'US', 'GB', 'KR', 'JP', 'CN', 'TH', 'FR', 'DE', 'IN', 'RU', 'BR', 'AU', 'CA', 'HK', 'TW'];
+
+const getFlagUrl = (code) => {
+  if (!code || code.length !== 2) return null;
+  return `https://flagcdn.com/24x18/${code.toLowerCase()}.png`;
+};
+
+const FlagImg = ({ code, size = 18, className = '' }) => {
+  const url = getFlagUrl(code);
+  if (!url) return <span className={className}>🌍</span>;
+  return (
+    <img
+      src={url}
+      alt={code}
+      width={size}
+      height={Math.round(size * 0.75)}
+      className={`inline-block shrink-0 ${className}`}
+      style={{ imageRendering: 'auto' }}
+      onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'inline'); }}
+    />
+  );
+};
 
 export default function IPTVTab({
   iptvTab, setIptvTab,
@@ -34,6 +53,9 @@ export default function IPTVTab({
 }) {
   const safeChannels = iptvChannels || [];
 
+  // Filter states
+  const [countrySearch, setCountrySearch] = useState('');
+
   // Sidebar width state
   const [sidebarWidth, setSidebarWidth] = useState(210);
 
@@ -41,29 +63,37 @@ export default function IPTVTab({
   const [subtitleText, setSubtitleText] = useState('');
   const [subtitleInterim, setSubtitleInterim] = useState('');
   const [subtitleStatus, setSubtitleStatus] = useState('idle'); // idle | listening | error | unsupported
-  const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioStreamRef = useRef(null);
+  const sendingRef = useRef(false);
 
   const iptvSubtitleOnRef = useRef(iptvSubtitleOn);
+
+  // Filtered countries
+  const filteredCountries = useMemo(() => {
+    if (!countrySearch) return ALL_IPTV_COUNTRIES;
+    const q = countrySearch.toLowerCase().trim();
+    return ALL_IPTV_COUNTRIES.filter(c =>
+      c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q)
+    );
+  }, [countrySearch]);
 
   // Sync ref with state
   useEffect(() => {
     iptvSubtitleOnRef.current = iptvSubtitleOn;
   }, [iptvSubtitleOn]);
 
-  // ===== SPEECH RECOGNITION =====
+  // ===== LIVE CAPTION: Groq Whisper (backend) + dịch sang tiếng Việt =====
   useEffect(() => {
-    // Check browser support
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      if (iptvSubtitleOn) setSubtitleStatus('unsupported');
-      return;
-    }
-
     if (!iptvSubtitleOn) {
-      // Stop recognition
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch(e) {}
-        recognitionRef.current = null;
+      // Stop capture
+      if (mediaRecorderRef.current) {
+        try { mediaRecorderRef.current.stop(); } catch(e) {}
+        mediaRecorderRef.current = null;
+      }
+      if (audioStreamRef.current) {
+        try { audioStreamRef.current.getTracks().forEach(t => t.stop()); } catch(e) {}
+        audioStreamRef.current = null;
       }
       setSubtitleText('');
       setSubtitleInterim('');
@@ -71,80 +101,86 @@ export default function IPTVTab({
       return;
     }
 
-    // Start recognition when subtitle is ON
+    // Lấy audio trực tiếp từ video element (không cần mic, nghe tiếng đang phát)
     const video = iptvVideoRef?.current;
     if (!video) return;
 
-    let recognition;
-    try {
-      recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.maxAlternatives = 1;
-      // Auto-detect language, or set to Vietnamese
-      recognition.lang = 'vi-VN';
+    let cancelled = false;
+    let stream = null;
+    let recorder = null;
 
-      recognition.onstart = () => {
+    const startRecorder = () => {
+      try {
+        stream = video.captureStream();
+        const audioTracks = stream.getAudioTracks();
+        if (!audioTracks.length) {
+          setSubtitleStatus('unsupported');
+          return;
+        }
+        audioStreamRef.current = stream;
+
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
+        recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        mediaRecorderRef.current = recorder;
         setSubtitleStatus('listening');
-      };
 
-      recognition.onresult = (event) => {
-        let finalText = '';
-        let interimText = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalText += transcript;
-          } else {
-            interimText += transcript;
+        recorder.ondataavailable = (e) => {
+          if (cancelled || !e.data || e.data.size < 3000) return;
+          if (sendingRef.current) return; // đang gửi chunk trước, bỏ qua để tránh trùng
+          sendingRef.current = true;
+
+          const formData = new FormData();
+          formData.append('audio', e.data, 'chunk.webm');
+          formData.append('lang', 'auto');
+
+          fetch('/api/services/transcribe', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('rexi_token') || ''}` },
+            body: formData,
+            credentials: 'include',
+          })
+            .then(r => r.json())
+            .then(data => {
+              sendingRef.current = false;
+              if (data?.success && data.text) {
+                setSubtitleText(prev => {
+                  const newText = (prev + ' ' + data.text).trim();
+                  return newText.length > 300 ? data.text.trim() : newText.slice(-300);
+                });
+              }
+            })
+            .catch(err => {
+              sendingRef.current = false;
+              console.warn('[Caption] fetch error:', err);
+            });
+        };
+
+        recorder.onerror = () => setSubtitleStatus('error');
+        recorder.onstop = () => {
+          if (cancelled) return;
+          if (iptvSubtitleOnRef.current) {
+            try { startRecorder(); } catch(e) {}
           }
-        }
-        if (finalText) {
-          setSubtitleText(prev => {
-            const newText = (prev + ' ' + finalText).trim();
-            // Reset if too long (indicating accumulated text without silence break)
-            return newText.length > 300 ? finalText.trim() : newText.slice(-300);
-          });
-        }
-        if (interimText) {
-          setSubtitleInterim(interimText);
-        }
-      };
+        };
+        // Ghi liên tục, cứ ~5s phát chunk
+        recorder.start(5000);
 
-      recognition.onerror = (event) => {
-        console.warn('Speech recognition error:', event.error);
-        if (event.error === 'no-speech') {
-          // No speech detected, restart
-          try { recognition.start(); } catch(e) {}
-        } else if (event.error === 'not-allowed') {
-          setSubtitleStatus('error');
-        } else {
-          // Auto-restart on other errors
-          setTimeout(() => {
-            try { recognition.start(); } catch(e) {}
-          }, 1000);
-        }
-      };
+      } catch (e) {
+        console.error('[Caption] Failed to start:', e);
+        setSubtitleStatus('error');
+      }
+    };
 
-      recognition.onend = () => {
-        // Auto-restart if still ON
-        if (iptvSubtitleOnRef.current && recognitionRef.current) {
-          try { recognition.start(); } catch(e) {}
-        }
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-
-    } catch(e) {
-      console.error('Failed to start speech recognition:', e);
-      setSubtitleStatus('error');
-    }
+    startRecorder();
 
     return () => {
-      if (recognition) {
-        try { recognition.stop(); } catch(e) {}
-      }
+      cancelled = true;
+      if (recorder) { try { recorder.stop(); } catch(e) {} }
+      if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch(e) {} }
+      mediaRecorderRef.current = null;
+      audioStreamRef.current = null;
     };
   }, [iptvSubtitleOn, iptvVideoRef]);
 
@@ -194,13 +230,96 @@ export default function IPTVTab({
             </span>
           </h3>
           <div className="flex gap-1 bg-[#131417] rounded-lg p-0.5 mt-2">
-            <button onClick={() => { setIptvTab?.('category'); fetchIPTV?.(iptvCategory); }} className={`flex-1 py-1 rounded text-[10px] font-medium transition-all ${iptvTab === 'category' ? 'bg-rose-500/20 text-rose-400' : 'text-slate-500 hover:text-white'}`}>
+            <button onClick={() => { setIptvTab?.('category'); setIptvSearch?.(''); fetchIPTV?.(iptvCategory); }} className={`flex-1 py-1 rounded text-[10px] font-medium transition-all ${iptvTab === 'category' ? 'bg-rose-500/20 text-rose-400' : 'text-slate-500 hover:text-white'}`}>
               <Globe size={10} className="inline mr-1" />Thể Loại
             </button>
-            <button onClick={() => { setIptvTab?.('country'); fetchIPTV?.(iptvCountry); }} className={`flex-1 py-1 rounded text-[10px] font-medium transition-all ${iptvTab === 'country' ? 'bg-rose-500/20 text-rose-400' : 'text-slate-500 hover:text-white'}`}>
+            <button onClick={() => { setIptvTab?.('country'); setIptvSearch?.(''); fetchIPTV?.(iptvCountry); }} className={`flex-1 py-1 rounded text-[10px] font-medium transition-all ${iptvTab === 'country' ? 'bg-rose-500/20 text-rose-400' : 'text-slate-500 hover:text-white'}`}>
               🌍 Quốc Gia
             </button>
           </div>
+
+          {/* Category filter buttons */}
+          {iptvTab === 'category' && (
+            <div className="mt-2 max-h-[160px] overflow-y-auto space-y-0.5 scrollbar-thin">
+              {IPTV_CATEGORIES.map(cat => (
+                <button
+                  key={cat.id}
+                  onClick={() => { setIptvCategory?.(cat.id); fetchIPTV?.(cat.id); }}
+                  className={`w-full text-left px-2 py-1 rounded text-[10px] font-medium transition-all ${
+                    iptvCategory === cat.id ? 'bg-rose-500/20 text-rose-300' : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  {cat.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Country filter */}
+          {iptvTab === 'country' && (
+            <div className="mt-2">
+              <div className="relative">
+                <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  value={countrySearch}
+                  onChange={e => setCountrySearch(e.target.value)}
+                  placeholder="Tìm quốc gia..."
+                  className="w-full pl-6 pr-2 py-1 bg-[#1a1b24] border border-white/5 rounded text-[10px] text-white placeholder-slate-600 outline-none focus:border-rose-500/30"
+                />
+              </div>
+              {/* Popular quick picks */}
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {POPULAR_COUNTRIES.map(code => {
+                  const c = ALL_IPTV_COUNTRIES.find(x => x.code === code);
+                  if (!c) return null;
+                  return (
+                    <button
+                      key={code}
+                      onClick={() => { setIptvCountry?.(code); setCountrySearch(''); fetchIPTV?.(null, code); }}
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-medium transition-all flex items-center gap-1 ${
+                        iptvCountry === code ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'text-slate-400 hover:text-white bg-white/5'
+                      }`}
+                      title={c.name}
+                    >
+                      <FlagImg code={code} size={14} />
+                      <span>{code}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Country list */}
+              <div className="mt-1 max-h-[200px] overflow-y-auto space-y-0.5 scrollbar-thin">
+                {/* Reset / All button */}
+                <button
+                  onClick={() => { setIptvCountry?.(null); setCountrySearch(''); fetchIPTV?.(iptvCategory || 'news'); }}
+                  className={`w-full text-left px-2 py-0.5 rounded text-[9px] font-medium transition-all ${
+                    !iptvCountry ? 'bg-rose-500/20 text-rose-300' : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  🌍 Tất cả ({ALL_IPTV_COUNTRIES.length} quốc gia)
+                </button>
+                <div className="border-t border-white/5 my-0.5" />
+                {filteredCountries.map(c => (
+                  <button
+                    key={c.code}
+                    onClick={() => { setIptvCountry?.(c.code); setCountrySearch(''); fetchIPTV?.(null, c.code); }}
+                    className={`w-full text-left px-2 py-0.5 rounded text-[9px] font-medium transition-all flex items-center gap-1.5 ${
+                      iptvCountry === c.code ? 'bg-rose-500/20 text-rose-300' : 'text-slate-400 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    <FlagImg code={c.code} size={14} />
+                    <span className="truncate">{c.name}</span>
+                    <span className="text-[8px] text-slate-600 ml-auto shrink-0">{c.code}</span>
+                  </button>
+                ))}
+                {filteredCountries.length === 0 && (
+                  <div className="text-[9px] text-slate-600 text-center py-2">Không tìm thấy quốc gia</div>
+                )}
+              </div>
+            </div>
+          )}
+
           <input
             type="text"
             value={iptvSearch || ''}
@@ -208,19 +327,35 @@ export default function IPTVTab({
             placeholder="Tìm kênh..."
             className="w-full mt-2 px-2 py-1.5 bg-[#1a1b24] border border-white/5 rounded-lg text-[10px] text-white placeholder-slate-600 outline-none focus:border-rose-500/30"
           />
-          
         </div>
         <div className="flex-1 overflow-y-auto">
+          {safeChannels.length === 0 && (
+            <div className="text-[10px] text-slate-600 text-center py-8">
+              Chọn thể loại hoặc quốc gia để xem kênh
+            </div>
+          )}
           {safeChannels.map((ch, i) => (
             <button
-              key={i}
+              key={ch.url || i}
               onClick={() => setSelectedChannel?.(ch)}
               className={`w-full text-left px-3 py-2 text-[10px] flex items-center gap-2 hover:bg-white/5 transition-colors ${
                 selectedChannel?.url === ch.url ? 'bg-rose-500/10 border-r-2 border-rose-400' : ''
               }`}
             >
-              <Play size={11} className={selectedChannel?.url === ch.url ? 'text-rose-400 fill-rose-400 shrink-0' : 'text-slate-500 shrink-0'} />
+              {ch.logo ? (
+                <img src={ch.logo} alt="" className="w-4 h-4 rounded object-contain shrink-0" onError={e => { e.target.style.display = 'none' }} />
+              ) : (
+                <Play size={11} className={`shrink-0 ${selectedChannel?.url === ch.url ? 'text-rose-400 fill-rose-400' : 'text-slate-500'}`} />
+              )}
               <span className="truncate flex-1">{ch.name}</span>
+              {ch.status && (
+                <span className={`text-[8px] px-1 py-0.5 rounded-full shrink-0 ${
+                  ch.status === 'online' ? 'bg-emerald-500/20 text-emerald-400' :
+                  ch.status === 'offline' ? 'bg-red-500/20 text-red-400' : 'bg-slate-500/20 text-slate-400'
+                }`}>
+                  {ch.status === 'online' ? '●' : ch.status === 'offline' ? '○' : '?'}
+                </span>
+              )}
             </button>
           ))}
         </div>

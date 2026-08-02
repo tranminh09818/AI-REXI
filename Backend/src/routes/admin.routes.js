@@ -200,7 +200,7 @@ router.get('/scan-history', (req, res) => {
     FROM iptv_scan_log ORDER BY id DESC LIMIT 20
   `).all();
 
-  rest.json({ success: true, history });
+  res.json({ success: true, history });
 });
 
 // ─── Kênh mới / mất ──────────────────────────────────────────
