@@ -15,6 +15,7 @@ import 'highlight.js/styles/tokyo-night-dark.css';
 import Hls from 'hls.js';
 
 // Components
+import { API_BASE, apiFetch } from './config';
 import Sidebar from './components/Sidebar';
 import ChatTab from './components/ChatTab';
 import CodeEditorTab from './components/CodeEditorTab';
@@ -22,11 +23,10 @@ import IPTVTab from './components/IPTVTab';
 import SettingsModal from './components/SettingsModal';
 import SkillsModal from './components/SkillsModal';
 import SuperToolsModal from './components/SuperToolsModal';
+import VideoToolsModal from './components/VideoToolsModal';
 import AdminPanel from './AdminPanel';
 import BrowserView from './components/BrowserView';
 
-// const API_BASE = "http://localhost:5000/api";  // REMOVED — vite proxy handles /api/*
-const API_BASE = "/api";
 
 marked.setOptions({
   highlight: (code, lang) => {
@@ -84,6 +84,7 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [superToolsOpen, setSuperToolsOpen] = useState(false);
+  const [videoToolsOpen, setVideoToolsOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
@@ -123,6 +124,17 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   const [speakingMsgId, setSpeakingMsgId] = useState(null);
+
+  // TTS Settings
+  const [ttsVoice, setTtsVoice] = useState(() => localStorage.getItem('rexi_tts_voice') || 'vi-VN-HoaiMyNeural');
+  const [ttsRate, setTtsRate] = useState(() => localStorage.getItem('rexi_tts_rate') || '+0%');
+  const [ttsPitch, setTtsPitch] = useState(() => localStorage.getItem('rexi_tts_pitch') || '+0%');
+  const [ttsVoices, setTtsVoices] = useState([]);
+  const [ttsVoicesLoading, setTtsVoicesLoading] = useState(true);
+  const [ttsUsingServer, setTtsUsingServer] = useState(() => {
+    const saved = localStorage.getItem('rexi_tts_mode');
+    return saved === 'server' && !!localStorage.getItem('rexi_token');
+  });
 
   // Skills List from Database
   const [dbSkills, setDbSkills] = useState([]);
@@ -192,11 +204,6 @@ export default function App() {
     return h;
   };
 
-  // Helper fetch chung: luôn gửi cookie session (cho Guest limits) + token đăng nhập
-  const apiFetch = (url, options = {}) => {
-    const headers = { ...authHeaders(), ...(options.headers || {}) };
-    return fetch(url, { ...options, headers, credentials: 'include' });
-  };
 
   // Fetch danh sách model động từ backend theo provider đang chọn
   const fetchAvailableModels = async (prov) => {
@@ -245,6 +252,26 @@ export default function App() {
   };
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
+
+   useEffect(() => {
+    const fetchTtsVoices = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/services/tts/voices`, {
+          headers: authHeaders(),
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (data.success && data.voices) {
+          setTtsVoices(data.voices);
+        }
+      } catch (err) {
+        console.log('[TTS] Could not fetch voices, using defaults');
+      } finally {
+        setTtsVoicesLoading(false);
+      }
+    };
+    fetchTtsVoices();
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', currentTheme);
@@ -668,18 +695,67 @@ useEffect(() => {
   };
 
   const speakText = (text, id) => {
-    if ('speechSynthesis' in window) {
-      if (speakingMsgId === id) {
+    const cleanText = text.replace(/<[^>]*>/g, '').replace(/[*#`_]/g, '').trim();
+    if (!cleanText) return;
+
+    // Nếu đang đọc tin nhắn này thì dừng
+    if (speakingMsgId === id) {
+      if (window.speechSynthesis) {
         window.speechSynthesis.cancel();
-        setSpeakingMsgId(null);
-        return;
       }
+      setSpeakingMsgId(null);
+      return;
+    }
+
+    // Dừng bất kỳ đọc nào đang chạy
+    if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text.replace(/<[^>]*>/g, '').replace(/[*#`_]/g, ''));
+    }
+
+    const useServerTTS = ttsUsingServer && authToken && cleanText.length <= 1000;
+
+    if (useServerTTS) {
+      // Dùng Backend TTS (edge-tts, chất lượng cao)
+      setSpeakingMsgId(id);
+      setTtsUsingServer(true);
+      fetch(`${API_BASE}/services/tts`, {
+        method: 'POST',
+        headers: authHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({
+          text: cleanText,
+          voice: ttsVoice,
+          rate: ttsRate,
+          pitch: ttsPitch
+        })
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.audio) {
+            const audio = new Audio('data:audio/mp3;base64,' + data.audio);
+            audio.play();
+            audio.onended = () => setSpeakingMsgId(null);
+          } else {
+            throw new Error(data.error || 'TTS server failed');
+          }
+        })
+        .catch(err => {
+          console.warn('[TTS] Server failed, falling back to browser:', err.message);
+          setTtsUsingServer(false);
+          speakBrowser(cleanText, id);
+        });
+    } else {
+      speakBrowser(cleanText, id);
+    }
+  };
+
+  const speakBrowser = (text, id) => {
+    if ('speechSynthesis' in window) {
+      setSpeakingMsgId(id);
+      const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'vi-VN';
       utterance.rate = 1.0;
       utterance.onend = () => setSpeakingMsgId(null);
-      setSpeakingMsgId(id);
       window.speechSynthesis.speak(utterance);
     }
   };
@@ -823,6 +899,46 @@ useEffect(() => {
     setCurrentUser(null);
   };
 
+  // Google Sign-In Handler
+  const handleGoogleSignIn = async (response) => {
+    try {
+      const res = await apiFetch('/auth/google', null, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential })
+      });
+      const data = await res.json();
+
+      if (data.success && data.token) {
+        setAuthToken(data.token);
+        localStorage.setItem('rexi_token', data.token);
+        if (data.user) {
+          setCurrentUser(data.user);
+          localStorage.setItem('rexi_user', JSON.stringify(data.user));
+        }
+        setAuthModalOpen(false);
+        showToast('Đăng nhập Google thành công!');
+      } else {
+        alert(data.error || 'Đăng nhập Google thất bại');
+      }
+    } catch (e) {
+      console.error('[Auth] Google login failed:', e);
+      alert('Không thể kết nối đến máy chủ. Vui lòng thử lại.');
+    }
+  };
+
+  // Initialize Google Sign-In
+  useEffect(() => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (clientId && window.google) {
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleGoogleSignIn,
+        auto_select: false,
+      });
+    }
+  }, []);
+
   const renderTree = (nodes) => nodes.map(node => (
     <div key={node.path}>
       {node.type === 'folder' ? (
@@ -956,12 +1072,55 @@ useEffect(() => {
           {/* Action Tools */}
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setVideoToolsOpen(true)}
+              className="p-2 rounded-xl bg-[#131417] border border-white/10 text-xs text-slate-300 hover:text-cyan-300 hover:border-cyan-500/40 flex items-center gap-1 transition-all"
+              title="Video & Audio Tools (TTS, Video, IPTV)"
+            >
+              <Play size={13} /> Video Tools
+            </button>
+
+            <button
               onClick={exportMd}
               className="px-2.5 py-1.5 rounded-xl bg-[#131417] border border-white/10 text-xs text-slate-300 hover:text-white flex items-center gap-1"
               title="Xuất lịch sử chat Markdown"
             >
               <Download size={13} /> Markdown
             </button>
+
+            {/* TTS Voice Selector */}
+            <div className="flex items-center gap-1.5">
+              <select
+                title="Chuyển đổi giọng nói thành server (edge-tts)"
+                value={ttsUsingServer ? 'server' : 'browser'}
+                onChange={e => {
+                  const useServer = e.target.value === 'server';
+                  setTtsUsingServer(useServer);
+                  localStorage.setItem('rexi_tts_mode', useServer ? 'server' : 'browser');
+                }}
+                className="bg-[#131417] text-[10px] font-medium text-slate-300 border border-white/10 rounded-xl px-2 py-1 outline-none cursor-pointer hover:border-cyan-500/40 transition-all shrink-0"
+              >
+                <option value="browser" className="bg-[#1e1f20] text-slate-200">Trình duyệt (miễn phí)</option>
+                <option value="server" className="bg-[#1e1f20] text-cyan-300">Server (edge-tts chất lượng cao)</option>
+              </select>
+
+              {ttsUsingServer && ttsVoices.length > 0 && (
+                <select
+                  title="Chọn giọng đọc tiếng Việt"
+                  value={ttsVoice}
+                  onChange={e => {
+                    setTtsVoice(e.target.value);
+                    localStorage.setItem('rexi_tts_voice', e.target.value);
+                  }}
+                  className="bg-[#131417] text-[10px] font-medium text-cyan-300 border border-cyan-500/30 rounded-xl px-2 py-1 outline-none cursor-pointer hover:border-cyan-400 transition-all shrink-0 max-w-[180px] truncate"
+                >
+                  {ttsVoices.map(v => (
+                    <option key={v.id} value={v.id} className="bg-[#1e1f20] text-slate-200">
+                      {v.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
 
             <select
               value={currentTheme}
@@ -988,8 +1147,9 @@ useEffect(() => {
               executionMode={executionMode} setExecutionMode={setExecutionMode}
               chatModeOpen={chatModeOpen} setChatModeOpen={setChatModeOpen}
               listening={listening} copiedId={copiedId} speakingMsgId={speakingMsgId}
-              handleSendMessage={handleSendMessage} startVoice={startVoice}
-              speakText={speakText} copyToClipboard={copyToClipboard}
+               handleSendMessage={handleSendMessage} startVoice={startVoice}
+               speakText={speakText} copyToClipboard={copyToClipboard}
+               ttsUsingServer={ttsUsingServer}
               fileInputRef={fileInputRef} handleFileSelect={handleFileSelect}
               chatScrollRef={chatScrollRef} handleChatScroll={handleChatScroll}
               showScrollTop={showScrollTop} showScrollBottom={showScrollBottom}
@@ -1092,7 +1252,16 @@ useEffect(() => {
       {/* ═══════════════════ SKILLS MODAL (DATABASE SKILLS) ═══════════════════ */}
       <SkillsModal skillsOpen={skillsOpen} setSkillsOpen={setSkillsOpen} dbSkills={dbSkills} />
 
-      {/* ═══════════════════ SUPER TOOLS MODAL (EXEC, GIT, MEMORY) ═══════════════════ */}
+      {/* Video & Audio Tools Modal - TTS / Video / IPTV */}
+      <VideoToolsModal
+        videoToolsOpen={videoToolsOpen}
+        setVideoToolsOpen={setVideoToolsOpen}
+        API_BASE={API_BASE}
+        authToken={authToken}
+        showToast={showToast}
+      />
+
+      {/* Super Tools Modal (Exec, Git, Memory) */}
       {superToolsOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-[#181920] border border-white/10 rounded-2xl w-full max-w-2xl p-6 space-y-4 shadow-2xl">
@@ -1331,7 +1500,19 @@ useEffect(() => {
                   <div className="flex-1 h-px bg-white/5"></div>
                 </div>
 
-                <button type="button" onClick={() => alert('Đăng nhập Google chưa được cấu hình. Vui lòng dùng tài khoản và mật khẩu.')} className="w-full py-2.5 rounded-xl bg-[#242530] hover:bg-[#2a2b38] text-white text-xs font-medium flex items-center justify-center gap-2 border border-white/5 transition-all">
+                <button type="button" onClick={() => {
+                  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+                  if (clientId && window.google) {
+                    window.google.accounts.id.prompt((notification) => {
+                      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+                        // Fallback: show Google One Tap in popup
+                        window.google.accounts.id.prompt();
+                      }
+                    });
+                  } else {
+                    alert('Google Sign-In chưa sẵn sàng. Vui lòng thử lại.');
+                  }
+                }} className="w-full py-2.5 rounded-xl bg-[#242530] hover:bg-[#2a2b38] text-white text-xs font-medium flex items-center justify-center gap-2 border border-white/5 transition-all">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
                     <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
