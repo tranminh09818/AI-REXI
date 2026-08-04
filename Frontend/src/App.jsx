@@ -229,6 +229,32 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('');
   const [authFullName, setAuthFullName] = useState('');
 
+  // Handle Google OAuth redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const googleToken = params.get('google_token');
+    const googleUser = params.get('user');
+    const googleError = params.get('error');
+
+    if (googleToken && googleUser) {
+      try {
+        const user = JSON.parse(decodeURIComponent(googleUser));
+        setAuthToken(googleToken);
+        localStorage.setItem('rexi_token', googleToken);
+        setCurrentUser(user);
+        localStorage.setItem('rexi_user', JSON.stringify(user));
+        showToast('Đăng nhập Google thành công!');
+        // Clean URL
+        window.history.replaceState({}, document.title, '/');
+      } catch (e) {
+        console.error('[Auth] Failed to parse Google user:', e);
+      }
+    } else if (googleError) {
+      alert('Đăng nhập Google thất bại: ' + googleError);
+      window.history.replaceState({}, document.title, '/');
+    }
+  }, []);
+
   const chatScrollRef = useRef(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
@@ -902,10 +928,11 @@ useEffect(() => {
   // Google Sign-In Handler
   const handleGoogleSignIn = async (response) => {
     try {
-      const res = await apiFetch('/auth/google', null, {
+      const res = await fetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: response.credential })
+        body: JSON.stringify({ credential: response.credential }),
+        credentials: 'include'
       });
       const data = await res.json();
 
@@ -923,21 +950,50 @@ useEffect(() => {
       }
     } catch (e) {
       console.error('[Auth] Google login failed:', e);
-      alert('Không thể kết nối đến máy chủ. Vui lòng thử lại.');
+      alert('Lỗi kết nối: ' + e.message);
     }
   };
 
-  // Initialize Google Sign-In
-  useEffect(() => {
+  // Open Google OAuth popup
+  const openGoogleOAuth = () => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    if (clientId && window.google) {
-      window.google.accounts.id.initialize({
-        client_id: clientId,
-        callback: handleGoogleSignIn,
-        auto_select: false,
-      });
-    }
-  }, []);
+    const redirectUri = encodeURIComponent('http://localhost:5000/api/auth/google/callback');
+    const scope = encodeURIComponent('email profile');
+    const state = encodeURIComponent(JSON.stringify({ action: 'google_login' }));
+    
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=credential&scope=${scope}&state=${state}&prompt=select_account`;
+    
+    // Open popup
+    const width = 500, height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popup = window.open(
+      googleAuthUrl,
+      'google_oauth',
+      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`
+    );
+    
+    // Listen for message from popup
+    const handleMessage = (event) => {
+      if (event.data && event.data.credential) {
+        handleGoogleSignIn({ credential: event.data.credential });
+        window.removeEventListener('message', handleMessage);
+        popup.close();
+      }
+    };
+    
+    window.addEventListener('message', handleMessage);
+    
+    // Fallback: check if popup closed
+    const checkPopup = setInterval(() => {
+      if (popup.closed) {
+        clearInterval(checkPopup);
+        window.removeEventListener('message', handleMessage);
+      }
+    }, 1000);
+  };
+
 
   const renderTree = (nodes) => nodes.map(node => (
     <div key={node.path}>
@@ -979,7 +1035,7 @@ useEffect(() => {
         handleDeleteConversation={handleDeleteConversation}
         filesDrawerOpen={filesDrawerOpen} setFilesDrawerOpen={setFilesDrawerOpen}
         renderTree={renderTree} fileTree={fileTree}
-        setSkillsOpen={setSkillsOpen} setSuperToolsOpen={setSuperToolsOpen}
+         setSkillsOpen={setSkillsOpen} setSuperToolsOpen={setSuperToolsOpen} setVideoToolsOpen={setVideoToolsOpen}
         currentUser={currentUser} setCurrentUser={setCurrentUser} setAuthToken={setAuthToken}
         setAuthModalOpen={setAuthModalOpen} setSettingsOpen={setSettingsOpen} setAdminOpen={setAdminOpen}
         apiFetch={apiFetch} API_BASE={API_BASE} showToast={showToast} setConversations={setConversations}
@@ -1500,19 +1556,7 @@ useEffect(() => {
                   <div className="flex-1 h-px bg-white/5"></div>
                 </div>
 
-                <button type="button" onClick={() => {
-                  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-                  if (clientId && window.google) {
-                    window.google.accounts.id.prompt((notification) => {
-                      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-                        // Fallback: show Google One Tap in popup
-                        window.google.accounts.id.prompt();
-                      }
-                    });
-                  } else {
-                    alert('Google Sign-In chưa sẵn sàng. Vui lòng thử lại.');
-                  }
-                }} className="w-full py-2.5 rounded-xl bg-[#242530] hover:bg-[#2a2b38] text-white text-xs font-medium flex items-center justify-center gap-2 border border-white/5 transition-all">
+                <button type="button" onClick={openGoogleOAuth} className="w-full py-2.5 rounded-xl bg-[#242530] hover:bg-[#2a2b38] text-white text-xs font-medium flex items-center justify-center gap-2 border border-white/5 transition-all">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
                     <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -1601,6 +1645,14 @@ useEffect(() => {
           >
             <Zap size={17} className="text-amber-400" />
             <span className="whitespace-nowrap">Super Tools (CLI/Git)</span>
+          </button>
+
+          <button
+            onClick={() => { setVideoToolsOpen(true); setFabOpen(false); }}
+            className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-purple-300 hover:text-white hover:bg-purple-500/20 transition-all"
+          >
+            <Play size={17} className="text-purple-400" />
+            <span className="whitespace-nowrap">Video & Audio Tools (TTS/Video/IPTV)</span>
           </button>
 
           <button

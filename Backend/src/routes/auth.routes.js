@@ -150,6 +150,64 @@ router.post('/google', (req, res) => {
     }
 });
 
+// Google OAuth Callback (for OAuth flow)
+router.get('/google/callback', async (req, res) => {
+    const { code, state } = req.query;
+    
+    if (!code) {
+        return res.redirect('http://localhost:5173?error=google_auth_failed');
+    }
+
+    try {
+        // Exchange code for tokens
+        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                code,
+                client_id: process.env.GOOGLE_CLIENT_ID || '1096474829666-lap43t9m59ic018jqcihtaa7b6d9n3co.apps.googleusercontent.com',
+                client_secret: process.env.GOOGLE_CLIENT_SECRET || '',
+                redirect_uri: 'http://localhost:5000/api/auth/google/callback',
+                grant_type: 'authorization_code'
+            })
+        });
+
+        const tokenData = await tokenResponse.json();
+        
+        if (!tokenData.access_token) {
+            console.error('[Auth] Google token exchange failed:', tokenData);
+            return res.redirect('http://localhost:5173?error=google_token_failed');
+        }
+
+        // Get user info from Google
+        const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+            headers: { Authorization: `Bearer ${tokenData.access_token}` }
+        });
+
+        const googleUser = await userResponse.json();
+        
+        if (!googleUser.email) {
+            return res.redirect('http://localhost:5173?error=google_user_failed');
+        }
+
+        // Find or create user in database
+        findOrCreateUser(googleUser.email, googleUser.name, googleUser.picture, 'google', (err, user) => {
+            if (err) {
+                console.error('[Auth] Google callback user error:', err);
+                return res.redirect('http://localhost:5173?error=server_error');
+            }
+
+            const token = generateToken(user);
+            // Redirect back to frontend with token
+            res.redirect(`http://localhost:5173?google_token=${token}&user=${encodeURIComponent(JSON.stringify(sanitizeUser(user)))}`);
+        });
+
+    } catch (e) {
+        console.error('[Auth] Google callback error:', e);
+        return res.redirect('http://localhost:5173?error=google_callback_failed');
+    }
+});
+
 // FORGOT / RESET PASSWORD
 router.post('/forgot-password', (req, res) => {
     const { account, email } = req.body;
