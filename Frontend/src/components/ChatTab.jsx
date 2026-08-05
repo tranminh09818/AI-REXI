@@ -17,10 +17,10 @@ export default function ChatTab({
   messages, inputText, setInputText, loading, attachedFiles,
   executionMode, setExecutionMode, chatModeOpen, setChatModeOpen,
   listening, copiedId, speakingMsgId,
-   handleSendMessage, startVoice, speakText, copyToClipboard,
-   fileInputRef, handleFileSelect, chatScrollRef, handleChatScroll,
-   showScrollTop, showScrollBottom, scrollToTopSmooth, scrollToBottomSmooth,
-   currentUser, ttsUsingServer
+  handleSendMessage, startVoice, speakText, copyToClipboard,
+  fileInputRef, handleFileSelect, chatScrollRef, handleChatScroll,
+  showScrollTop, showScrollBottom, scrollToTopSmooth, scrollToBottomSmooth,
+  currentUser
 }) {
   const dropdownRef = useRef(null);
 
@@ -44,15 +44,13 @@ export default function ChatTab({
       <div className="relative flex-1 min-h-0">
         <div ref={chatScrollRef} onScroll={handleChatScroll} className="h-full overflow-y-auto space-y-4 pr-1 mt-2">
           {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-5">
-              <img src="/rexi_cat_icon.png" alt="Rexi" className="rexi-logo w-14 h-14 object-contain opacity-90" />
+            <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-6">
+              <img src="/rexi_cat_icon.png" alt="Rexi" className="rexi-logo w-16 h-16 object-contain" />
               <div>
-                <h2 className="text-xl font-semibold text-slate-100">
-                  CHÀO {currentUser?.ten_day_du?.toUpperCase() || 'BẠN'}
+                <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">
+                  Chào {currentUser?.ten_day_du || 'bạn'}! Tôi là AI Rexi Master.
                 </h2>
-                <p className="text-xs text-slate-500 mt-2 max-w-xs mx-auto leading-relaxed">
-                  Tôi là AI Rexi. Hỏi tôi bất cứ điều gì.
-                </p>
+                <p className="text-xs text-slate-400 mt-2">Hệ thống trợ lý AI tích hợp 35+ Skills Agent, Giọng đọc Tiếng Việt, Office CLI, WiFi Health & IPTV Hub</p>
               </div>
             </div>
           ) : (
@@ -64,10 +62,10 @@ export default function ChatTab({
                 {msg.vai_tro !== 'user' && (
                   <img src="/rexi_cat_icon.png" alt="Rexi" className="rexi-logo rexi-logo-no-glow w-7 h-7 shrink-0 mt-0.5 object-contain" />
                 )}
-                <div className={`relative max-w-[80%] rounded-2xl px-4 py-3 shadow-sm ${
+                <div className={`relative max-w-[85%] rounded-2xl p-4 shadow-sm ${
                   msg.vai_tro === 'user'
-                    ? 'bg-[#2d3748] text-white rounded-tr-sm'
-                    : 'bg-[#1e1f20] border border-white/5 text-slate-200 rounded-tl-sm'
+                    ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-tr-none'
+                    : 'bg-[#1e1f20] border border-white/5 text-slate-200 rounded-tl-none prose-rexi'
                 }`}>
                   {msg.vai_tro === 'user' ? (
                     <p className="whitespace-pre-wrap">{msg.noi_dung}</p>
@@ -87,7 +85,7 @@ export default function ChatTab({
                       <button onClick={() => speakText(msg.noi_dung, msg.ma_tin_nhan)}
                         className={`flex items-center gap-1 transition-colors ${speakingMsgId === msg.ma_tin_nhan ? "text-amber-400 animate-pulse" : "hover:text-cyan-400"}`}>
                         <Volume2 size={13} />
-                        <span>{speakingMsgId === msg.ma_tin_nhan ? 'Đang đọc...' : ttsUsingServer ? 'Đọc (Server)' : 'Đọc giọng nói'}</span>
+                        <span>{speakingMsgId === msg.ma_tin_nhan ? 'Đang đọc...' : 'Đọc giọng nói'}</span>
                       </button>
                       <button onClick={() => copyToClipboard(msg.noi_dung, msg.ma_tin_nhan)}
                         className="flex items-center gap-1 hover:text-cyan-400 transition-colors">
@@ -107,9 +105,11 @@ export default function ChatTab({
           {loading && (
             <div className="flex gap-3 items-center text-slate-400 text-xs">
               <img src="/rexi_cat_icon.png" alt="Rexi" className="rexi-logo rexi-logo-no-glow w-7 h-7 object-contain" />
-              <div className="flex items-center gap-2 bg-[#1e1f20] px-4 py-2.5 rounded-full border border-white/5">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                <span className="font-medium text-slate-300">Đang suy nghĩ...</span>
+              <div className="flex items-center gap-1.5 bg-[#1e1f20] px-4 py-2.5 rounded-full border border-white/5">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce"></span>
+                <span className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce [animation-delay:0.2s]"></span>
+                <span className="w-2 h-2 rounded-full bg-purple-400 animate-bounce [animation-delay:0.4s]"></span>
+                <span className="ml-2 font-medium">Rexi đang phân tích...</span>
               </div>
             </div>
           )}
@@ -142,70 +142,79 @@ export default function ChatTab({
       )}
 
       {/* Input Area */}
-      <div className="mt-4 relative">
+      <div className="mt-3 relative">
         <input type="file" ref={fileInputRef} onChange={handleFileSelect} multiple className="hidden" />
-        
-        {/* Mode Tabs - Inline like Mã T3 */}
-        <div className="flex items-center gap-2 mb-2 px-1">
-          <button
-            type="button"
-            onClick={() => setExecutionMode('chat')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-              executionMode !== 'agent' 
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' 
-                : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-            }`}
-          >
-            <span>💬</span>
-            <span>Chat AI</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setExecutionMode('agent')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-              executionMode === 'agent' 
-                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' 
-                : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-            }`}
-          >
-            <span>⚡</span>
-            <span>Agent Mode</span>
-          </button>
-          <div className="h-4 w-px bg-white/10 mx-1" />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="p-1.5 rounded-full text-slate-400 hover:text-cyan-400 hover:bg-white/5 transition-all"
-            title="Đính kèm file"
-          >
-            <Paperclip size={14} />
-          </button>
-          <button 
-            type="button"
-            onClick={startVoice} 
-            className={`p-1.5 rounded-full transition-all ${listening ? "text-rose-400 animate-pulse bg-rose-500/10" : "text-slate-400 hover:text-cyan-400 hover:bg-white/5"}`} 
-            title="Nhập bằng giọng nói"
-          >
-            <Mic size={14} />
-          </button>
-        </div>
+        <div className="flex items-center bg-[#181920] border border-white/10 focus-within:border-cyan-500/50 rounded-2xl px-4 py-2.5 shadow-xl transition-all">
+          
+          {/* Mode Selector */}
+          <div className="relative mr-1.5 shrink-0" ref={dropdownRef}>
+            <button
+              type="button"
+              onClick={() => setChatModeOpen(!chatModeOpen)}
+              className="flex items-center gap-1 bg-[#13141c] border border-white/20 hover:border-cyan-500/40 rounded-lg px-2.5 py-1 cursor-pointer text-[11px] font-semibold transition-all justify-between text-cyan-300 shadow-sm w-[110px] shrink-0 select-none"
+            >
+              <div className="flex items-center gap-1">
+                <span className="text-cyan-400 text-xs">{executionMode === 'agent' ? '⚡' : '💬'}</span>
+                <span>{executionMode === 'agent' ? 'Agent Mode' : 'Chat AI'}</span>
+              </div>
+              <span className="text-slate-400 text-[9px] ml-1">^</span>
+            </button>
 
-        {/* Input Box */}
-        <div className="flex items-end bg-[#1a1b26] border border-white/10 focus-within:border-cyan-500/40 rounded-2xl px-4 py-3 shadow-lg transition-all">
+            {chatModeOpen && (
+              <div className="absolute bottom-full left-0 mb-1 w-52 bg-[#141522] border border-white/10 rounded-xl shadow-xl p-1 z-50">
+                {/* Option 1: Chat AI */}
+                <button
+                  type="button"
+                  onClick={() => { setExecutionMode('chat'); setChatModeOpen(false); }}
+                  className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-lg transition-all text-left cursor-pointer ${
+                    executionMode !== 'agent' ? 'bg-[#1b1c2e] border border-white/10' : 'hover:bg-white/5 border border-transparent'
+                  }`}
+                >
+                  <span className="text-xs shrink-0 mt-0.5">💬</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] font-bold text-slate-100">Chat AI</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 leading-tight">Trò chuyện AI thông thường</div>
+                  </div>
+                </button>
+
+                {/* Option 2: Agent Mode */}
+                <button
+                  type="button"
+                  onClick={() => { setExecutionMode('agent'); setChatModeOpen(false); }}
+                  className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-lg transition-all text-left mt-1 cursor-pointer ${
+                    executionMode === 'agent' ? 'bg-[#2b1845] border border-purple-500/40 shadow-sm' : 'hover:bg-white/5 border border-transparent'
+                  }`}
+                >
+                  <span className="text-xs shrink-0 mt-0.5 text-purple-300">⚡</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] font-bold text-purple-200">Agent Mode</div>
+                    <div className="text-[10px] text-purple-300/80 mt-0.5 leading-tight">Tự động thực thi code & tác vụ</div>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-cyan-400 transition-colors" title="Đính kèm file">
+            <Paperclip size={16} />
+          </button>
+          <button onClick={startVoice} className={`p-2 transition-colors ${listening ? "text-rose-400 animate-pulse" : "text-slate-400 hover:text-cyan-400"}`} title="Nhập bằng giọng nói">
+            <Mic size={16} />
+          </button>
+
           <textarea
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
-            placeholder="Hỏi AI Rexi bất cứ điều gì..."
+            placeholder="Hỏi AI Rexi bất cứ điều gì... (Enter để gửi)"
             rows={1}
-            className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-500 outline-none resize-none max-h-32"
+            className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-500 outline-none resize-none max-h-32 px-2"
           />
-          <button 
-            onClick={() => handleSendMessage()}
+
+          <button onClick={() => handleSendMessage()}
             disabled={(!inputText.trim() && attachedFiles.length === 0) || loading}
-            className="ml-3 w-9 h-9 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white flex items-center justify-center shadow-md transition-all shrink-0"
-          >
-            <Send size={15} />
+            className="ml-2 p-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 text-white shadow-md transition-all shrink-0">
+            <Send size={16} />
           </button>
         </div>
       </div>
