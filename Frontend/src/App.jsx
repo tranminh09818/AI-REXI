@@ -23,7 +23,6 @@ import IPTVTab from './components/IPTVTab';
 import SettingsModal from './components/SettingsModal';
 import SkillsModal from './components/SkillsModal';
 import SuperToolsModal from './components/SuperToolsModal';
-import VideoToolsModal from './components/VideoToolsModal';
 import AdminPanel from './AdminPanel';
 import BrowserView from './components/BrowserView';
 
@@ -84,7 +83,6 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [superToolsOpen, setSuperToolsOpen] = useState(false);
-  const [videoToolsOpen, setVideoToolsOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
@@ -957,11 +955,19 @@ useEffect(() => {
   // Open Google OAuth popup
   const openGoogleOAuth = () => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    const redirectUri = encodeURIComponent('http://localhost:5000/api/auth/google/callback');
-    const scope = encodeURIComponent('email profile');
-    const state = encodeURIComponent(JSON.stringify({ action: 'google_login' }));
+    const redirectUri = 'http://localhost:5000/api/auth/google/callback';
+    const scope = 'email profile';
     
-    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=credential&scope=${scope}&state=${state}&prompt=select_account`;
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: scope,
+      prompt: 'select_account',
+      access_type: 'offline'
+    });
+    
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
     
     // Open popup
     const width = 500, height = 600;
@@ -1035,7 +1041,7 @@ useEffect(() => {
         handleDeleteConversation={handleDeleteConversation}
         filesDrawerOpen={filesDrawerOpen} setFilesDrawerOpen={setFilesDrawerOpen}
         renderTree={renderTree} fileTree={fileTree}
-         setSkillsOpen={setSkillsOpen} setSuperToolsOpen={setSuperToolsOpen} setVideoToolsOpen={setVideoToolsOpen}
+         setSkillsOpen={setSkillsOpen} setSuperToolsOpen={setSuperToolsOpen}
         currentUser={currentUser} setCurrentUser={setCurrentUser} setAuthToken={setAuthToken}
         setAuthModalOpen={setAuthModalOpen} setSettingsOpen={setSettingsOpen} setAdminOpen={setAdminOpen}
         apiFetch={apiFetch} API_BASE={API_BASE} showToast={showToast} setConversations={setConversations}
@@ -1227,8 +1233,7 @@ useEffect(() => {
               setSelectedChannel={setSelectedChannel} fetchIPTV={fetchIPTV}
               iptvVideoRef={iptvVideoRef}
               iptvSubtitleOn={iptvSubtitleOn} setIptvSubtitleOn={setIptvSubtitleOn}
-            />
-          )}
+          );}
 
           {/* TAB 5: REMOTE DESKTOP CONTROL */}
           {activeTab === 'desktop' && (
@@ -1284,12 +1289,12 @@ useEffect(() => {
             </div>
           )}
 
-          {/* TAB 6: BROWSER AGENT (Playwright + Stagehand) */}
+           {/* TAB 6: BROWSER AGENT (Playwright + Stagehand) */}
           {activeTab === 'browser' && (
             <BrowserView token={authToken} currentUser={currentUser} onClose={() => setActiveTab('chat')} />
           )}
 
-          {/* TAB 7: ADMIN PANEL */}
+           {/* TAB 7: ADMIN PANEL */}
           {activeTab === 'admin' && currentUser?.phan_quyen === 'admin' && (
             <AdminPanel token={authToken} currentUser={currentUser} onClose={() => setActiveTab('chat')} />
           )}
@@ -1299,15 +1304,6 @@ useEffect(() => {
 
       {/* ═══════════════════ SKILLS MODAL (DATABASE SKILLS) ═══════════════════ */}
       <SkillsModal skillsOpen={skillsOpen} setSkillsOpen={setSkillsOpen} dbSkills={dbSkills} />
-
-      {/* Video & Audio Tools Modal - TTS / Video / IPTV */}
-      <VideoToolsModal
-        videoToolsOpen={videoToolsOpen}
-        setVideoToolsOpen={setVideoToolsOpen}
-        API_BASE={API_BASE}
-        authToken={authToken}
-        showToast={showToast}
-      />
 
       {/* Super Tools Modal (Exec, Git, Memory) */}
       {superToolsOpen && (
@@ -1597,7 +1593,7 @@ useEffect(() => {
             { tab: 'chat', icon: <MessageSquare size={17} />, label: 'Chat AI', color: 'text-cyan-400' },
             { tab: 'code', icon: <Code size={17} />, label: 'Editor & Preview', color: 'text-blue-400' },
             { tab: 'files', icon: <Folder size={17} />, label: 'Workspace Files', color: 'text-amber-400' },
-            { tab: 'iptv', icon: <Tv size={17} />, label: 'IPTV Truyền Hình', color: 'text-rose-400' },
+             { tab: 'iptv', icon: <Tv size={17} />, label: 'IPTV Truyền Hình', color: 'text-rose-400' },
             { tab: 'desktop', icon: <Monitor size={17} />, label: 'Remote Desktop', color: 'text-emerald-400' },
             { tab: 'browser', icon: <Bot size={17} />, label: 'Browser Agent', color: 'text-purple-400' },
             ...(currentUser?.phan_quyen === 'admin' ? [{ tab: 'admin', icon: <Shield size={17} />, label: 'Quản Trị Viên', color: 'text-amber-400' }] : []),

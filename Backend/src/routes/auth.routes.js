@@ -165,8 +165,8 @@ router.get('/google/callback', async (req, res) => {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({
                 code,
-                client_id: process.env.GOOGLE_CLIENT_ID || '1096474829666-lap43t9m59ic018jqcihtaa7b6d9n3co.apps.googleusercontent.com',
-                client_secret: process.env.GOOGLE_CLIENT_SECRET || '',
+                client_id: process.env.VITE_GOOGLE_CLIENT_ID,
+                client_secret: process.env.GOOGLE_CLIENT_SECRET,
                 redirect_uri: 'http://localhost:5000/api/auth/google/callback',
                 grant_type: 'authorization_code'
             })
