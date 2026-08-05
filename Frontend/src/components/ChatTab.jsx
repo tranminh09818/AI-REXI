@@ -142,56 +142,58 @@ export default function ChatTab({
       )}
 
       {/* Input Area */}
-      <div className="mt-3 relative">
+      <div className="mt-3 relative z-10">
         <input type="file" ref={fileInputRef} onChange={handleFileSelect} multiple className="hidden" />
-        <div className="flex items-center bg-[#181920] border border-white/10 focus-within:border-cyan-500/50 rounded-2xl px-4 py-2.5 shadow-xl transition-all">
+        <div className="flex items-center bg-[#181920] border border-white/10 focus-within:border-cyan-500/50 rounded-2xl px-4 py-2.5 shadow-xl transition-colors">
           
-          {/* Mode Selector */}
+          {/* Mode Selector - Fixed width, dropdown positioned absolutely */}
           <div className="relative mr-1.5 shrink-0" ref={dropdownRef}>
             <button
               type="button"
               onClick={() => setChatModeOpen(!chatModeOpen)}
-              className="flex items-center gap-1 bg-[#13141c] border border-white/20 hover:border-cyan-500/40 rounded-lg px-2.5 py-1 cursor-pointer text-[11px] font-semibold transition-all justify-between text-cyan-300 shadow-sm w-[110px] shrink-0 select-none"
+              className="flex items-center gap-1 bg-[#13141c] border border-white/20 hover:border-cyan-500/40 rounded-lg px-2.5 py-1 cursor-pointer text-[11px] font-semibold justify-between text-cyan-300 shadow-sm w-[110px] shrink-0 select-none transition-colors"
             >
-              <div className="flex items-center gap-1">
-                <span className="text-cyan-400 text-xs">{executionMode === 'agent' ? '⚡' : '💬'}</span>
-                <span>{executionMode === 'agent' ? 'Agent Mode' : 'Chat AI'}</span>
+              <div className="flex items-center gap-1 overflow-hidden">
+                <span className="text-cyan-400 text-xs shrink-0">{executionMode === 'agent' ? '⚡' : '💬'}</span>
+                <span className="truncate">{executionMode === 'agent' ? 'Agent Mode' : 'Chat AI'}</span>
               </div>
-              <span className="text-slate-400 text-[9px] ml-1">^</span>
+              <span className="text-slate-400 text-[9px] ml-1 shrink-0">▾</span>
             </button>
 
+            {/* Dropdown - absolute, không đẩy elements khác */}
             {chatModeOpen && (
-              <div className="absolute bottom-full left-0 mb-1 w-52 bg-[#141522] border border-white/10 rounded-xl shadow-xl p-1 z-50">
-                {/* Option 1: Chat AI */}
-                <button
-                  type="button"
-                  onClick={() => { setExecutionMode('chat'); setChatModeOpen(false); }}
-                  className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-lg transition-all text-left cursor-pointer ${
-                    executionMode !== 'agent' ? 'bg-[#1b1c2e] border border-white/10' : 'hover:bg-white/5 border border-transparent'
-                  }`}
-                >
-                  <span className="text-xs shrink-0 mt-0.5">💬</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[11px] font-bold text-slate-100">Chat AI</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5 leading-tight">Trò chuyện AI thông thường</div>
-                  </div>
-                </button>
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setChatModeOpen(false)} />
+                <div className="absolute bottom-full left-0 mb-1 w-52 bg-[#141522] border border-white/10 rounded-xl shadow-2xl p-1 z-50">
+                  <button
+                    type="button"
+                    onClick={() => { setExecutionMode('chat'); setChatModeOpen(false); }}
+                    className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-lg text-left cursor-pointer transition-colors ${
+                      executionMode !== 'agent' ? 'bg-[#1b1c2e] border border-white/10' : 'hover:bg-white/5 border border-transparent'
+                    }`}
+                  >
+                    <span className="text-xs shrink-0 mt-0.5">💬</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] font-bold text-slate-100">Chat AI</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5 leading-tight">Trò chuyện AI thông thường</div>
+                    </div>
+                  </button>
 
-                {/* Option 2: Agent Mode */}
-                <button
-                  type="button"
-                  onClick={() => { setExecutionMode('agent'); setChatModeOpen(false); }}
-                  className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-lg transition-all text-left mt-1 cursor-pointer ${
-                    executionMode === 'agent' ? 'bg-[#2b1845] border border-purple-500/40 shadow-sm' : 'hover:bg-white/5 border border-transparent'
-                  }`}
-                >
-                  <span className="text-xs shrink-0 mt-0.5 text-purple-300">⚡</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[11px] font-bold text-purple-200">Agent Mode</div>
-                    <div className="text-[10px] text-purple-300/80 mt-0.5 leading-tight">Tự động thực thi code & tác vụ</div>
-                  </div>
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={() => { setExecutionMode('agent'); setChatModeOpen(false); }}
+                    className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-lg text-left mt-1 cursor-pointer transition-colors ${
+                      executionMode === 'agent' ? 'bg-[#2b1845] border border-purple-500/40 shadow-sm' : 'hover:bg-white/5 border border-transparent'
+                    }`}
+                  >
+                    <span className="text-xs shrink-0 mt-0.5 text-purple-300">⚡</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] font-bold text-purple-200">Agent Mode</div>
+                      <div className="text-[10px] text-purple-300/80 mt-0.5 leading-tight">Tự động thực thi code & tác vụ</div>
+                    </div>
+                  </button>
+                </div>
+              </>
             )}
           </div>
 
@@ -221,3 +223,4 @@ export default function ChatTab({
     </div>
   );
 }
+

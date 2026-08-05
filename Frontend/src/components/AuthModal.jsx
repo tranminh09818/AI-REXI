@@ -1,3 +1,4 @@
+import { API_BASE } from '../config';
 import React, { useState } from 'react';
 import { X, LogIn, UserPlus, Lock, Eye, EyeOff } from 'lucide-react';
 
@@ -33,7 +34,7 @@ export default function AuthModal({
                 {forgotMsg && <p className="text-xs text-emerald-400">{forgotMsg}</p>}
                 <button onClick={async () => {
                   try {
-                    const res = await fetch('/api/auth/forgot-password', {
+                    const res = await fetch(`${API_BASE}/auth/forgot-password`, {
                       method: 'POST', headers: {'Content-Type': 'application/json'},
                       body: JSON.stringify({ email: forgotEmail })
                     });
@@ -41,7 +42,7 @@ export default function AuthModal({
                     if (data.success) { setForgotMsg(data.otp_debug ? 'OTP đã được gửi! (debug: ' + data.otp_debug + ')' : 'Kiểm tra email để lấy OTP.'); setForgotStep('otp'); }
                     else { setForgotMsg(data.error || 'Không tìm thấy tài khoản.'); }
                   } catch { setForgotMsg('Lỗi kết nối server.'); }
-                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95">Gửi OTP</button>
+                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all">Gửi OTP</button>
               </div>
             )}
             {forgotStep === 'otp' && (
@@ -53,7 +54,7 @@ export default function AuthModal({
                   placeholder="Mật khẩu mới" className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50" />
                 <button onClick={async () => {
                   try {
-                    const res = await fetch('/api/auth/reset-password', {
+                    const res = await fetch(`${API_BASE}/auth/reset-password`, {
                       method: 'POST', headers: {'Content-Type': 'application/json'},
                       body: JSON.stringify({ email: forgotEmail, otp_code: otpCode, new_password: newPassword })
                     });
@@ -61,7 +62,7 @@ export default function AuthModal({
                     if (data.success) { setForgotMsg('Đặt lại mật khẩu thành công! Đăng nhập lại.'); setTimeout(() => { setShowForgot(false); setAuthMode('login'); }, 1500); }
                     else { setForgotMsg(data.error || 'OTP không đúng hoặc đã hết hạn.'); }
                   } catch { setForgotMsg('Lỗi kết nối server.'); }
-                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95">Đặt lại mật khẩu</button>
+                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all">Đặt lại mật khẩu</button>
               </div>
             )}
           </>
@@ -93,7 +94,7 @@ export default function AuthModal({
                 </button>
               </div>
               <button type="submit"
-                className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-lg shadow-cyan-500/20">
+                className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-cyan-500/20">
                 {authMode === 'login' ? <><LogIn size={14} />Đăng Nhập</> : <><UserPlus size={14} />Tạo Tài Khoản</>}
               </button>
             </form>

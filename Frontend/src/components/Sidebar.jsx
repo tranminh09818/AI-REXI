@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  Menu, Plus, MessageSquare, Code, Folder, Tv, Monitor,
-  Layers, Zap, Search, Trash2, ChevronDown, FolderOpen,
-  User, Settings, LogOut, Headphones, Shield, Bot, Globe
-} from 'lucide-react';
+   Menu, Plus, MessageSquare, Code, Folder, Tv, Monitor,
+   Layers, Zap, Search, Trash2, ChevronDown, FolderOpen,
+   User, Settings, LogOut, Headphones, Shield, Bot, Globe,
+   Play
+ } from 'lucide-react';
 
 const RexiLogo = ({ className = "w-8 h-8" }) => (
   <img src="/rexi_cat_icon.png" alt="Rexi" className={`rexi-logo object-contain ${className}`} />
@@ -16,7 +17,7 @@ export default function Sidebar({
   activeConvId, setActiveConvId,
   handleNewConversation, handleDeleteConversation,
   filesDrawerOpen, setFilesDrawerOpen, renderTree, fileTree,
-  setSkillsOpen, setSuperToolsOpen,
+  setSkillsOpen, setSuperToolsOpen, setVideoToolsOpen,
   currentUser, setCurrentUser, setAuthToken, setAuthModalOpen, setSettingsOpen, setAdminOpen,
   apiFetch, API_BASE, showToast, setConversations
 }) {
@@ -105,7 +106,7 @@ export default function Sidebar({
       <div className="p-3">
         <button
           onClick={handleNewConversation}
-          className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm shadow-lg shadow-cyan-500/20 transition-all active:scale-95"
+          className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm shadow-lg shadow-cyan-500/20 transition-all"
         >
           <Plus size={18} />
           <span>Cuộc Trò Chuyện Mới</span>
@@ -127,6 +128,12 @@ export default function Sidebar({
           className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-amber-900/30 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-medium transition-all"
         >
           <Zap size={14} /> Super Tools
+        </button>
+        <button
+          onClick={() => setVideoToolsOpen(true)}
+          className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-purple-900/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-medium transition-all"
+        >
+          <Play size={14} /> Video Tools
         </button>
       </div>
 

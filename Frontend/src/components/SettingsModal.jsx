@@ -1,15 +1,16 @@
+import { API_BASE } from '../config';
 import React, { useState, useEffect } from 'react';
 import { X, Settings, Eye, EyeOff, RefreshCw, Zap, Globe } from 'lucide-react';
 
 const FALLBACK_PROVIDERS = {
-  gemini: { name: 'Google Gemini', placeholder: 'AIzaSy...' },
+  gemini: { name: 'Google Gemini', placeholder: 'AIzaSy...', defaultBaseUrl: '' },
   omniroute: { name: '🌐 OmniRoute Gateway (290+ Providers)', placeholder: 'http://localhost:20128/v1 (No key needed)', defaultBaseUrl: 'http://localhost:20128/v1' },
-  openai: { name: 'OpenAI GPT-4o / O3', placeholder: 'sk-proj-...' },
-  claude: { name: 'Anthropic Claude 3.5', placeholder: 'sk-ant-...' },
-  deepseek: { name: 'DeepSeek AI (V3/R1)', placeholder: 'sk-...' },
-  groq: { name: 'Groq Cloud (Fast Llama)', placeholder: 'gsk_...' },
-  github: { name: 'GitHub Models (Free)', placeholder: 'ghp_...' },
-  opencode: { name: 'OpenCode Agent Engine', placeholder: 'Internal Engine' },
+  openai: { name: 'OpenAI GPT-4o / O3', placeholder: 'sk-proj-...', defaultBaseUrl: 'https://api.openai.com/v1' },
+  claude: { name: 'Anthropic Claude 3.5', placeholder: 'sk-ant-...', defaultBaseUrl: '' },
+  deepseek: { name: 'DeepSeek AI (V3/R1)', placeholder: 'sk-...', defaultBaseUrl: 'https://api.deepseek.com/v1' },
+  groq: { name: 'Groq Cloud (Fast Llama)', placeholder: 'gsk_...', defaultBaseUrl: 'https://api.groq.com/openai/v1' },
+  github: { name: 'GitHub Models (Free)', placeholder: 'ghp_...', defaultBaseUrl: 'https://models.inference.ai.azure.com' },
+  opencode: { name: 'OpenCode Agent Engine', placeholder: 'Internal Engine', defaultBaseUrl: '' },
   ollama: { name: 'Ollama Local AI', placeholder: 'http://localhost:11434', defaultBaseUrl: 'http://localhost:11434' },
   freellmapi: { name: 'Free LLM API Gateway', placeholder: 'http://localhost:8080/v1', defaultBaseUrl: 'http://localhost:8080/v1' },
   custom: { name: 'Custom Endpoint / OpenRouter', placeholder: 'sk-or-v1-...', defaultBaseUrl: 'https://openrouter.ai/api/v1' }
@@ -35,7 +36,7 @@ export default function SettingsModal({
   const fetchProviders = async () => {
     setLoadingProviders(true);
     try {
-      const res = await fetch('/api/models/providers');
+      const res = await fetch(`${API_BASE}/models/providers`);
       const data = await res.json();
       if (data.success && Array.isArray(data.providers)) {
         setDynamicProviders(data.providers);
@@ -52,17 +53,26 @@ export default function SettingsModal({
     setProvider(newProv);
     localStorage.setItem('rexi_provider', newProv);
 
-    // Tự động điền Base URL và Model gợi ý chuẩn cho OmniRoute / Custom / Ollama
-    if (newProv === 'omniroute') {
-      const omniUrl = 'http://localhost:20128/v1';
-      setBaseUrl(omniUrl);
-      localStorage.setItem('rexi_base_url', omniUrl);
-    } else if (newProv === 'ollama' && !baseUrl) {
-      setBaseUrl('http://localhost:11434');
-      localStorage.setItem('rexi_base_url', 'http://localhost:11434');
-    } else if (newProv === 'custom' && !baseUrl) {
-      setBaseUrl('https://openrouter.ai/api/v1');
-      localStorage.setItem('rexi_base_url', 'https://openrouter.ai/api/v1');
+    // Auto-fill Base URL theo provider
+    const provInfo = FALLBACK_PROVIDERS[newProv];
+    if (provInfo?.defaultBaseUrl) {
+      setBaseUrl(provInfo.defaultBaseUrl);
+      localStorage.setItem('rexi_base_url', provInfo.defaultBaseUrl);
+    }
+
+    // Auto-fill model gợi ý
+    const defaultModels = {
+      gemini: 'gemini-3.6-flash',
+      openai: 'gpt-4o',
+      claude: 'claude-3-5-sonnet-20241022',
+      deepseek: 'deepseek-chat',
+      groq: 'llama-3.3-70b-versatile',
+      github: 'gpt-4o',
+      ollama: 'llama3.2',
+    };
+    if (defaultModels[newProv]) {
+      setModelName(defaultModels[newProv]);
+      localStorage.setItem('rexi_model', defaultModels[newProv]);
     }
   };
 
@@ -159,14 +169,23 @@ export default function SettingsModal({
               type="text"
               value={baseUrl}
               onChange={e => { setBaseUrl(e.target.value); localStorage.setItem('rexi_base_url', e.target.value); }}
-              placeholder={provider === 'omniroute' ? 'http://localhost:20128/v1' : 'https://api.openai.com/v1'}
+              placeholder={
+                provider === 'gemini' ? 'Không cần điền — Gemini dùng API Key trực tiếp'
+                : provider === 'claude' ? 'Không cần điền — Claude dùng API Key trực tiếp'
+                : provider === 'opencode' ? 'Internal engine — không cần URL'
+                : provider === 'omniroute' ? 'http://localhost:20128/v1'
+                : 'https://api.openai.com/v1'
+              }
               className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50 font-mono"
             />
+            {(provider === 'gemini' || provider === 'claude' || provider === 'opencode') && (
+              <p className="text-[10px] text-slate-500 mt-1">Provider này dùng API Key trực tiếp, không cần Base URL</p>
+            )}
           </div>
 
           <button
             onClick={() => setSettingsOpen(false)}
-            className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-sm rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-1.5"
+            className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-sm rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5"
           >
             <Zap size={15} /> Lưu Cài Đặt
           </button>

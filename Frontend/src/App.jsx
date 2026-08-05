@@ -1128,14 +1128,6 @@ useEffect(() => {
           {/* Action Tools */}
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setVideoToolsOpen(true)}
-              className="p-2 rounded-xl bg-[#131417] border border-white/10 text-xs text-slate-300 hover:text-cyan-300 hover:border-cyan-500/40 flex items-center gap-1 transition-all"
-              title="Video & Audio Tools (TTS, Video, IPTV)"
-            >
-              <Play size={13} /> Video Tools
-            </button>
-
-            <button
               onClick={exportMd}
               className="px-2.5 py-1.5 rounded-xl bg-[#131417] border border-white/10 text-xs text-slate-300 hover:text-white flex items-center gap-1"
               title="Xuất lịch sử chat Markdown"
@@ -1455,7 +1447,7 @@ useEffect(() => {
                       setForgotMessage(data.error || 'Không thể tạo mã OTP.');
                     }
                   } catch { setForgotMessage('Lỗi kết nối server.'); }
-                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95">Gửi OTP</button>
+                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all">Gửi OTP</button>
                 <button type="button" onClick={() => { setForgotStep('login'); setForgotMessage(''); }} className="w-full text-xs text-slate-500 hover:text-white transition-colors">Quay lại Đăng Nhập</button>
               </div>
             ) : forgotStep === 'reset' ? (
@@ -1488,7 +1480,7 @@ useEffect(() => {
                       setForgotMessage(data.error || 'OTP không đúng.');
                     }
                   } catch { setForgotMessage('Lỗi kết nối server.'); }
-                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all active:scale-95">Đặt lại mật khẩu</button>
+                }} className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm rounded-xl transition-all">Đặt lại mật khẩu</button>
                 <button type="button" onClick={() => { setForgotStep('request'); setForgotMessage(''); }} className="w-full text-xs text-slate-500 hover:text-white transition-colors">Gửi lại OTP</button>
               </div>
             ) : (
@@ -1648,14 +1640,6 @@ useEffect(() => {
           </button>
 
           <button
-            onClick={() => { setVideoToolsOpen(true); setFabOpen(false); }}
-            className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-purple-300 hover:text-white hover:bg-purple-500/20 transition-all"
-          >
-            <Play size={17} className="text-purple-400" />
-            <span className="whitespace-nowrap">Video & Audio Tools (TTS/Video/IPTV)</span>
-          </button>
-
-          <button
             onClick={() => { setSettingsOpen(true); setFabOpen(false); }}
             className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-white/10 transition-all"
           >
@@ -1668,10 +1652,10 @@ useEffect(() => {
         <button
           onClick={() => setFabOpen(!fabOpen)}
           className={`
-            w-13 h-13 p-3.5 rounded-2xl flex items-center justify-center shadow-2xl transition-all duration-300 active:scale-95
+            w-13 h-13 p-3.5 rounded-2xl flex items-center justify-center shadow-2xl transition-all duration-300
             ${fabOpen
               ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30 rotate-180'
-              : 'bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white shadow-cyan-500/30 hover:scale-105'
+              : 'bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white shadow-cyan-500/30'
             }
           `}
           title={fabOpen ? 'Thu gọn menu' : 'Mở thanh công cụ nhanh'}
