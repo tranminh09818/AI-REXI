@@ -57,8 +57,13 @@ const TOOL_REGISTRY = [
   },
   {
     name: 'text_to_speech',
-    description: 'Táº¡o giá»ng Ä‘á»c tá»« vÄƒn báº£n, tráº£ vá» file audio',
-    parameters: { type: 'object', properties: { text: { type: 'string', description: 'Ná»™i dung cáº§n Ä‘á»c' }, voice: { type: 'string', description: 'Giá»ng Ä‘á»c (vi-VN-HoaiMyNeural, vi-VN-NamMinhNeural...)', default: 'vi-VN-HoaiMyNeural' } }, required: ['text'] }
+    description: 'Tạo giọng nói tiếng Việt từ văn bản, trả về file audio. Hỗ trợ 10 giọng nói (Nam/Nữ, Bắc/Nam), điều chỉnh tốc độ và cao độ.',
+    parameters: { type: 'object', properties: { 
+      text: { type: 'string', description: 'Nội dung cần đọc' }, 
+      voice: { type: 'string', description: 'Giọng đọc: vi-VN-HoaiMyNeural (Nữ/Bắc), vi-VN-NamMinhNeural (Nam/Nam), vi-VN-DuyAnhNeural (Nam/Bắc), vi-VN-ThuyMinhNeural (Nữ/Nam)...', default: 'vi-VN-HoaiMyNeural' },
+      rate: { type: 'string', description: 'Tốc độ: +20% hoặc -10%', default: '+0%' },
+      pitch: { type: 'string', description: 'Cao độ giọng: +10% hoặc -5%', default: '+0%' }
+    }, required: ['text'] }
   }
 ];
 
@@ -144,8 +149,32 @@ async function executeTool(toolName, args) {
       }
     }
     case 'text_to_speech': {
+      const VALID_TTS_VOICES = [
+        'vi-VN-HoaiMyNeural', 'vi-VN-NamMinhNeural', 'vi-VN-DuyAnhNeural',
+        'vi-VN-HaSanhNeural', 'vi-VN-MinhAnhNeural', 'vi-VN-ThuyMinhNeural',
+        'vi-VN-ThiTuyetNeural', 'vi-VN-VanHanhNeural', 'vi-VN-VanMinhNeural',
+        'vi-VN-CaoVietNeural'
+      ];
+      const voiceName = VALID_TTS_VOICES.includes(args.voice) ? args.voice : 'vi-VN-HoaiMyNeural';
+      const validRate = args.rate && /^[+-]\d+%$/.test(args.rate) ? args.rate : '+0%';
+      const validPitch = args.pitch && /^[+-]\d+%$/.test(args.pitch) ? args.pitch : '+0%';
+      const cleanedText = (args.text || '').replace(/"/g, '\\"').substring(0, 1000);
+      if (!cleanedText.trim()) return { error: 'Văn bản trống' };
       const outFile = path.join(__dirname, '..', '..', 'temp', 'tts_' + Date.now() + '.mp3');
-      return new Promise(r => exec('edge-tts --voice ' + (args.voice||'vi-VN-HoaiMyNeural') + ' --text "' + args.text.replace(/"/g,'\\"') + '" --write-media "' + outFile + '"', { timeout: 30000 }, e => r(e ? { error: e.message } : { success: true, audioFile: outFile })));
+      const os = require('os');
+      const isWin = os.platform() === 'win32';
+      return new Promise(r => {
+        const spawn = require('child_process').spawn;
+        const cmd = isWin ? 'powershell' : 'python3';
+        const baseArgs = isWin
+          ? ['-Command', `python -m edge_tts --voice "${voiceName}" --text "${cleanedText}" --rate "${validRate}" --pitch "${validPitch}" --write-media "${outFile}"`]
+          : ['-m', 'edge_tts', '--voice', voiceName, '--text', cleanedText, '--rate', validRate, '--pitch', validPitch, '--write-media', outFile];
+        const proc = spawn(cmd, baseArgs, { timeout: 30000 });
+        let stderr = '';
+        proc.stderr.on('data', d => { stderr += d.toString(); });
+        proc.on('close', code => r(code === 0 ? { success: true, audioFile: outFile, voice: voiceName } : { error: `TTS failed (code ${code}): ${stderr}` }));
+        proc.on('error', err => r({ error: err.message }));
+      });
     }
     default:
       return { error: "Tool '" + toolName + "' chua duoc implement" };

@@ -1,21 +1,7 @@
+import { API_BASE, apiFetch } from '../config';
 import React, { useEffect, useRef, useState } from 'react';
 import { Maximize2, X, RefreshCw, Search, Loader2, Zap, Bot } from 'lucide-react';
 
-// const API_BASE = 'http://localhost:5000/api';  // REMOVED — vite proxy handles /api/*
-const API_BASE = '/api';
-
-async function apiFetch(path, options = {}) {
-  const token = localStorage.getItem('rexi_token');
-  const headers = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
-    ...(options.headers || {}),
-  };
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
-}
 
 export default function BrowserView({ token, onClose }) {
   const canvasRef = useRef(null);

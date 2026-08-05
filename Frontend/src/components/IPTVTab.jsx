@@ -1,3 +1,4 @@
+import { API_BASE } from '../config';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Tv, Globe, Play, Radio, Search } from 'lucide-react';
 import { ALL_IPTV_COUNTRIES } from '../data/iptvCountries.js';
@@ -135,7 +136,7 @@ export default function IPTVTab({
           formData.append('audio', e.data, 'chunk.webm');
           formData.append('lang', 'auto');
 
-          fetch('/api/services/transcribe', {
+          fetch(`${API_BASE}/services/transcribe`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${localStorage.getItem('rexi_token') || ''}` },
             body: formData,

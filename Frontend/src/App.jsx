@@ -24,6 +24,7 @@ import SettingsModal from './components/SettingsModal';
 import SkillsModal from './components/SkillsModal';
 import SuperToolsModal from './components/SuperToolsModal';
 import AdminPanel from './AdminPanel';
+import StudioTab from './components/StudioTab';
 import BrowserView from './components/BrowserView';
 
 
@@ -367,7 +368,7 @@ useEffect(() => {
 
   const fetchMessages = async (convId) => {
     try {
-      const res = await apiFetch(`${API_BASE}/chat/conversations/${convId}/messages`);
+      const res = await apiFetch(`${API_BASE}/chat/conversations/${convId}/messages`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setMessages(data);
@@ -1233,9 +1234,19 @@ useEffect(() => {
               setSelectedChannel={setSelectedChannel} fetchIPTV={fetchIPTV}
               iptvVideoRef={iptvVideoRef}
               iptvSubtitleOn={iptvSubtitleOn} setIptvSubtitleOn={setIptvSubtitleOn}
-          );}
+            />
+          )}
 
-          {/* TAB 5: REMOTE DESKTOP CONTROL */}
+          {/* TAB 5: VIDEO & AUDIO STUDIO */}
+          {activeTab === 'studio' && (
+            <StudioTab
+              API_BASE={API_BASE}
+              authToken={authToken}
+              showToast={showToast}
+            />
+          )}
+
+          {/* TAB 6: REMOTE DESKTOP CONTROL */}
           {activeTab === 'desktop' && (
             <div className="flex flex-col h-full w-full p-4 bg-[#0d0e11] space-y-3">
               <div className="flex items-center justify-between bg-[#181920] p-3 rounded-2xl border border-white/5">
@@ -1594,6 +1605,7 @@ useEffect(() => {
             { tab: 'code', icon: <Code size={17} />, label: 'Editor & Preview', color: 'text-blue-400' },
             { tab: 'files', icon: <Folder size={17} />, label: 'Workspace Files', color: 'text-amber-400' },
              { tab: 'iptv', icon: <Tv size={17} />, label: 'IPTV Truyền Hình', color: 'text-rose-400' },
+            { tab: 'studio', icon: <Play size={17} />, label: 'Video & Audio Studio', color: 'text-purple-400' },
             { tab: 'desktop', icon: <Monitor size={17} />, label: 'Remote Desktop', color: 'text-emerald-400' },
             { tab: 'browser', icon: <Bot size={17} />, label: 'Browser Agent', color: 'text-purple-400' },
             ...(currentUser?.phan_quyen === 'admin' ? [{ tab: 'admin', icon: <Shield size={17} />, label: 'Quản Trị Viên', color: 'text-amber-400' }] : []),
@@ -1648,7 +1660,7 @@ useEffect(() => {
         <button
           onClick={() => setFabOpen(!fabOpen)}
           className={`
-            w-13 h-13 p-3.5 rounded-2xl flex items-center justify-center shadow-2xl transition-all duration-300
+            w-[52px] h-[52px] p-3.5 rounded-2xl flex items-center justify-center shadow-2xl transition-all duration-300
             ${fabOpen
               ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30 rotate-180'
               : 'bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white shadow-cyan-500/30'

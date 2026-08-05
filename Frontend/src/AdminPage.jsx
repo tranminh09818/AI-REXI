@@ -3,26 +3,12 @@ import {
   Users, Shield, UserCheck, UserX, Server, Database, Activity,
   RefreshCw, Home, MessageSquare, Trash2, Key, BarChart3,
   Lock, Unlock, ChevronLeft, ChevronRight, Search, AlertTriangle,
-  CheckCircle, XCircle, Crown, User as UserIcon
+  CheckCircle, XCircle, Crown, User as UserIcon, Github
 } from 'lucide-react';
-
-// const API_BASE = "http://localhost:5000/api";  // REMOVED — vite proxy handles /api/*
-const API_BASE = "/api";
+import { API_BASE, apiFetch } from './config';
+import GitHubTrending from './components/GitHubTrending';
 
 // ─── Helper: API call với token ───────────────────────────
-async function apiFetch(path, token, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-      ...(options.headers || {}),
-    },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
-}
 
 // ─── Badge Role ───────────────────────────────────────────
 function RoleBadge({ role }) {
@@ -288,7 +274,7 @@ export default function AdminPage() {
 
   const deleteModel = async (modelId) => {
     try {
-      await apiFetch(`/api/admin/models/${encodeURIComponent(modelId)}`, token, { method: 'DELETE' });
+      await apiFetch(`/admin/models/${encodeURIComponent(modelId)}`, token, { method: 'DELETE' });
       showToast('Đã xóa model', 'success');
       Object.keys(allModelsByProvider).forEach(p => fetchAdminModels(p));
     } catch (e) { showToast('Lỗi xóa: ' + e.message, 'error'); }
@@ -633,6 +619,9 @@ export default function AdminPage() {
             </div>
           </div>
         </div>
+
+        {/* GITHUB TRENDING */}
+        <GitHubTrending token={token} />
       </main>
 
       {/* ── TOAST ────────────────────────────────────────── */}

@@ -1,6 +1,11 @@
 const express = require('express');
 const router = express.Router();
+const { authMiddleware, adminMiddleware } = require('../middleware/auth.middleware');
 const { executeTool, TOOL_REGISTRY, callAI } = require('../services/agentService');
+
+// FIX SECURITY: agent routes thực thi lệnh/browser/file -> bắt buộc admin (trước đây không auth = RCE)
+router.use(authMiddleware);
+router.use(adminMiddleware);
 
 // ========== AGENT TOOL CHAT API ==========
 // Đây là API cho AI Agent tự động gọi tools, tự kiểm tra, tự sửa lỗi

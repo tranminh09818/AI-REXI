@@ -1,10 +1,7 @@
+import { apiFetch } from "../config";
 import React, { useState } from 'react';
 import { Globe, Search, Loader2, ExternalLink, CheckCircle, AlertTriangle, Clock, Image, Link, FileText, BarChart3 } from 'lucide-react';
 
-async function apiFetch(path, options = {}) {
-  const res = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers } });
-  return res.json();
-}
 
 export default function WebAnalyzer({ apiFetch: apiFetchProp, showToast }) {
   const [url, setUrl] = useState('');

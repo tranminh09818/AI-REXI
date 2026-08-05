@@ -3,6 +3,14 @@ const { JWT_SECRET } = require('./auth.middleware');
 
 const requestCounts = new Map();
 const WINDOW_MS = 60 * 1000; // 1 minute window
+
+// FIX memory leak: dọn entries hết hạn định kỳ (trước đây Map không bao giờ được xóa)
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, rec] of requestCounts.entries()) {
+    if (now > rec.resetTime) requestCounts.delete(ip);
+  }
+}, WINDOW_MS);
 const MAX_REQUESTS_PER_MINUTE = 100; // Relax limit to 100 requests per minute for normal users
 
 function rateLimitMiddleware(req, res, next) {

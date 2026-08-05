@@ -40,4 +40,9 @@ services_snippet.txt
 found_step.json
 tmp_*.js
 refactor*.cjs
+_debug_archive/
 
+
+# SQLite WAL/SHM temp
+*.db-wal
+*.db-shm

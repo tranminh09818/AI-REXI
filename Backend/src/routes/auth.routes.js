@@ -113,19 +113,22 @@ router.post('/login', (req, res) => {
 });
 
 // Đăng nhập Google
-router.post('/google', (req, res) => {
+router.post('/google', async (req, res) => {
     const { credential } = req.body;
     if (!credential) {
         return res.status(400).json({ error: 'Thiếu Google credential.' });
     }
 
     try {
-        const parts = credential.split('.');
-        if (parts.length !== 3) {
-            return res.status(400).json({ error: 'Credential không hợp lệ.' });
+        // FIX SECURITY: verify ID token thật với Google (tokeninfo) thay vì chỉ decode base64
+        const verifyRes = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential));
+        if (!verifyRes.ok) {
+            return res.status(401).json({ error: 'Credential Google không hợp lệ (verify thất bại).' });
         }
-
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        const payload = await verifyRes.json();
+        if (!payload || !payload.email) {
+            return res.status(401).json({ error: 'Credential Google không hợp lệ.' });
+        }
         const email = payload.email;
         const name = payload.name || payload.given_name || email.split('@')[0];
         const avatar = payload.picture || null;

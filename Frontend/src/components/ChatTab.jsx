@@ -85,7 +85,7 @@ export default function ChatTab({
                       <button onClick={() => speakText(msg.noi_dung, msg.ma_tin_nhan)}
                         className={`flex items-center gap-1 transition-colors ${speakingMsgId === msg.ma_tin_nhan ? "text-amber-400 animate-pulse" : "hover:text-cyan-400"}`}>
                         <Volume2 size={13} />
-                        <span>{speakingMsgId === msg.ma_tin_nhan ? 'Đang đọc...' : 'Đọc giọng nói'}</span>
+                        <span>{speakingMsgId === msg.ma_tin_nhan ? "Dừng" : "Đọc"}</span>
                       </button>
                       <button onClick={() => copyToClipboard(msg.noi_dung, msg.ma_tin_nhan)}
                         className="flex items-center gap-1 hover:text-cyan-400 transition-colors">

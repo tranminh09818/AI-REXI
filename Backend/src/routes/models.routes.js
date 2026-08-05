@@ -5,7 +5,7 @@ const { authMiddleware, adminMiddleware } = require('../middleware/auth.middlewa
 const fs = require('fs');
 const { execSync } = require('child_process');
 
-const OPENCODE_BIN_PATH = "C:\\Users\\84916\\.opencode\\bin\\opencode.exe";
+const OPENCODE_BIN_PATH = process.env.OPENCODE_BIN_PATH || (process.env.USERPROFILE ? require("path").join(process.env.USERPROFILE, ".opencode", "bin", "opencode.exe") : "");
 const IS_OPENCODE_AVAILABLE = fs.existsSync(OPENCODE_BIN_PATH);
 
 // ─── Public: lấy danh sách models đang hoạt động ─────────────
@@ -45,7 +45,7 @@ router.get('/', (req, res) => {
 
 // ─── Public: kiểm tra SELECT từ bảng khoa_api ─────────────
 // GET /api/models/test-db-select
-router.get('/test-db-select', (req, res) => {
+router.get('/test-db-select', [authMiddleware, adminMiddleware], (req, res) => {
   db.all("SELECT ma_khoa, ten_nha_cung_cap, gia_tri_khoa FROM khoa_api", [], (err, rows) => {
     if (err) {
       return res.status(500).json({ success: false, error: 'Lỗi truy vấn SQL: ' + err.message });
@@ -66,20 +66,7 @@ router.get('/test-db-select', (req, res) => {
   });
 });
 
-// Tự động log kiểm tra câu lệnh SELECT và ghi kết quả thực tế từ CSDL
-db.all("SELECT ma_khoa, ten_nha_cung_cap, gia_tri_khoa FROM khoa_api", [], (err, rows) => {
-  const resultText = err 
-    ? `Lỗi truy vấn SELECT từ khoa_api: ${err.message}`
-    : `KẾT QUẢ KIỂM TRA BẢNG khoa_api DỮ LIỆU THẬT TỪ CSDL:\n- Tổng số bản ghi (rows): ${(rows || []).length}\n- Danh sách bản ghi:\n` + 
-      (rows && rows.length > 0 
-        ? rows.map((r, i) => `  ${i+1}. Provider: ${r.ten_nha_cung_cap} | Mã khoa: ${r.ma_khoa} | Key: ${r.gia_tri_khoa || 'Chưa có key'}`).join('\n')
-        : '  (Bảng khoa_api hiện chưa có bản ghi nào)');
-  
-  try {
-    fs.writeFileSync('d:\\AI REXI\\ssms_check_result.txt', resultText, 'utf8');
-    console.log('[DB-Select-Check]', resultText);
-  } catch (e) {}
-});
+// [removed] startup debug block da log toan bo API key ra console + ssms_check_result.txt (don dep bao mat)
 
 // ─── Public: Lấy danh sách Nhà cung cấp (Providers) động ─────────────
 // GET /api/models/providers hoặc GET /api/providers
@@ -260,6 +247,21 @@ async function fetchModelsFromProvider(provider, apiKey, baseUrl) {
     if (data.data && Array.isArray(data.data)) modelsList = data.data.map(m => m.id);
     else if (data.models && Array.isArray(data.models)) modelsList = data.models.map(m => m.id || m.name);
     else if (data.error) return { success: false, error: 'Claude: ' + (data.error.message || JSON.stringify(data.error)) };
+  } else if (provider === 'kiraai') {
+    const cleanedBase = (baseUrl || 'https://kiraai.vn/api/v1').replace(/\/+$/, '');
+    const endpoint = cleanedBase.endsWith('/models') ? cleanedBase : cleanedBase + '/models';
+    const resp = await fetch(endpoint, { headers: { 'Authorization': 'Bearer ' + apiKey } });
+    const data = await resp.json();
+    if (data.data && Array.isArray(data.data)) modelsList = data.data.map(m => m.id);
+    else if (data.models && Array.isArray(data.models)) modelsList = data.models.map(m => m.id || m.name);
+    else if (data.error) return { success: false, error: 'KiraAI: ' + (data.error.message || JSON.stringify(data.error)) };
+  } else if (provider === 'bazaarlink') {
+    const cleanedBase = (baseUrl || 'https://api.bazaarlink.ai/v1').replace(/\/+$/, '');
+    const endpoint = cleanedBase.endsWith('/models') ? cleanedBase : cleanedBase + '/models';
+    const resp = await fetch(endpoint, { headers: { 'Authorization': 'Bearer ' + apiKey } });
+    const data = await resp.json();
+    if (data.data && Array.isArray(data.data)) modelsList = data.data.map(m => m.id);
+    else if (data.error) return { success: false, error: 'BazaarLink: ' + (data.error.message || JSON.stringify(data.error)) };
   } else if (provider === 'github') {
     const resp = await fetch('https://models.github.ai/inference/models', { headers: { 'Authorization': 'Bearer ' + apiKey } });
     const data = await resp.json();
@@ -464,12 +466,20 @@ async function verifyModelHealth(provider, apiKey, baseUrl, modelId) {
       }
     }
 
-    if (['openai', 'groq', 'grok', 'deepseek', 'github', 'custom', 'freellmapi'].includes(provider)) {
+    if (['openai', 'groq', 'grok', 'deepseek', 'github', 'custom', 'freellmapi', 'kiraai', 'bazaarlink'].includes(provider)) {
       let endpoint = 'https://api.openai.com/v1/chat/completions';
       if (provider === 'groq') endpoint = 'https://api.groq.com/openai/v1/chat/completions';
       if (provider === 'grok') endpoint = 'https://api.x.ai/v1/chat/completions';
       if (provider === 'deepseek') endpoint = 'https://api.deepseek.com/chat/completions';
       if (provider === 'github') endpoint = 'https://models.github.ai/inference/chat/completions';
+      if (provider === 'kiraai') {
+        const base = cleanBase || 'https://kiraai.vn/api/v1';
+        endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
+      }
+      if (provider === 'bazaarlink') {
+        const base = cleanBase || 'https://api.bazaarlink.ai/v1';
+        endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
+      }
       if (provider === 'freellmapi' || provider === 'custom') {
         const base = cleanBase || (provider === 'custom' ? 'https://openrouter.ai/api/v1' : 'http://localhost:8080/v1');
         endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
@@ -566,7 +576,7 @@ router.post('/admin/models/verify-and-scan', [authMiddleware, adminMiddleware], 
 
 // ─── Admin: Đẩy Các Model Đang Hoạt Động Lên Trang Chủ ───────
 // POST /api/admin/models/publish-active
-router.post('/api/admin/models/publish-active', [authMiddleware, adminMiddleware], async (req, res) => {
+router.post('/admin/models/publish-active', [authMiddleware, adminMiddleware], async (req, res) => {
   const { provider, api_key, models } = req.body;
   if (!provider || !Array.isArray(models)) {
     return res.status(400).json({ success: false, error: 'Thiếu dữ liệu provider hoặc danh sách models.' });

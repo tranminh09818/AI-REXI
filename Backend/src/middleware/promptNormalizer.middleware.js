@@ -17,30 +17,15 @@ const TEENCODE_MAP = {
   'sđt': 'số điện thoại',
   'sdt': 'số điện thoại',
   'cmt': 'bình luận',
-  'sp': 'sản phẩm',
-  'ko': 'không',
-  'k0': 'không',
-  'k': 'không',
-  'đk': 'được',
-  'dk': 'được',
-  'dc': 'được',
-  'đc': 'được',
-  'h': 'hiện tại',
-  't': 'tôi',
-  'm': 'bạn',
-  'r': 'rồi',
-  'z': 'vậy',
-  'v': 'vậy',
   'ngta': 'người ta',
   'bây h': 'bây giờ',
   'bay h': 'bây giờ',
   'khi nào': 'khi nào',
-  'dự án': 'dự án',
-  'db': 'cơ sở dữ liệu',
-  'csdl': 'cơ sở dữ liệu',
-  'api': 'API',
-  'config': 'cấu hình'
+  'dự án': 'dự án'
 };
+
+// LƯU Ý: Đã bỏ các token 1-2 ký tự (t, m, v, r, z, h, k, dc, dk, đc, đk, db, api, cm, sp, ko, k0...)
+// vì chúng làm HỎNG prompt code (vd: 'db = connect()' bị biến thành 'cơ sở dữ liệu = connect()').
 
 function normalizePrompt(text) {
   if (!text || typeof text !== 'string') return text;

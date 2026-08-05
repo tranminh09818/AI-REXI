@@ -10,7 +10,7 @@ const { authMiddleware, adminMiddleware, guestMiddleware, guestAgentMiddleware, 
 const { GUEST_USER_ID } = require('../ensure-admin');
 
 // --- CONFIGURATION ---
-const OPENCODE_BIN_PATH = "C:\\Users\\84916\\.opencode\\bin\\opencode.exe";
+const OPENCODE_BIN_PATH = process.env.OPENCODE_BIN_PATH || (process.env.USERPROFILE ? require("path").join(process.env.USERPROFILE, ".opencode", "bin", "opencode.exe") : "");
 const IS_OPENCODE_AVAILABLE = fs.existsSync(OPENCODE_BIN_PATH);
 
 // --- CACHING FOR MODELS ---
@@ -578,6 +578,12 @@ router.post('/conversations/:id/messages', (req, res, next) => {
         }
       }
 
+      // Fetch base_url from ai_providers table for custom providers
+      const providerRow = await new Promise((resProv) => {
+        db.get("SELECT base_url FROM ai_providers WHERE ma_nha_cung_cap = ?", [selectedProvider], (err, r) => resProv(r));
+      });
+      let baseUrl = providerRow && providerRow.base_url ? providerRow.base_url : null;
+
       if (!keyToUse && selectedProvider === 'gemini' && process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'YOUR_GEMINI_API_KEY_HERE') {
         keyToUse = process.env.GEMINI_API_KEY;
       }
@@ -606,7 +612,7 @@ router.post('/conversations/:id/messages', (req, res, next) => {
         const locationStr = user_location || 'Hà Nội, Việt Nam';
 
         const memoryRows = await new Promise((resMem) => {
-          db.all("SELECT noi_dung FROM bo_nho_dai_han ORDER BY do_uu_tien DESC LIMIT 5", [], (err, r) => resMem(r || []));
+          db.all("SELECT noi_dung FROM bo_nho_dai_han WHERE ma_nguoi_dung = ? ORDER BY do_uu_tien DESC LIMIT 5", [req.user ? req.user.id : GUEST_USER_ID], (err, r) => resMem(r || []));
         });
         const memoryText = memoryRows.map(m => "- " + m.noi_dung).join('\n');
 
@@ -698,11 +704,12 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
               parts: [{ text: h.noi_dung }]
             }));
             
+            // CHỈ gửi thinkingConfig khi user chọn thinking_level = 'deep'.
+            // KHÔNG gửi thinkingBudget: 0 — một số model Gemini mới (3.x)
+            // trả lỗi 400 INVALID_ARGUMENT khi nhận thinkingBudget = 0.
             const genConfig = {};
             if (thinking_level === 'deep') {
               genConfig.thinkingConfig = { thinkingBudget: 8192 };
-            } else {
-              genConfig.thinkingConfig = { thinkingBudget: 0 };
             }
 
             try {
@@ -733,24 +740,32 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
               }
             }
 
-          } else if (['openai', 'deepseek', 'groq', 'github', 'freellmapi', 'ollama', 'custom', 'omniroute'].includes(selectedProvider)) {
+          } else if (['openai', 'deepseek', 'groq', 'github', 'freellmapi', 'ollama', 'custom', 'omniroute', 'kiraai', 'bazaarlink'].includes(selectedProvider)) {
             let endpoint = "https://api.openai.com/v1/chat/completions";
             if (selectedProvider === 'omniroute') {
               const defaultOmni = process.env.OMNIROUTE_BASE_URL || "http://localhost:20128/v1";
-              const cleanedBase = (base_url || defaultOmni).replace(/\/+$/, '');
+              const cleanedBase = (baseUrl || defaultOmni).replace(/\/+$/, '');
               endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
             } else if (selectedProvider === 'deepseek') endpoint = "https://api.deepseek.com/chat/completions";
             else if (selectedProvider === 'groq') endpoint = "https://api.groq.com/openai/v1/chat/completions";
             else if (selectedProvider === 'github') endpoint = "https://models.github.ai/inference/chat/completions";
+            else if (selectedProvider === 'kiraai') {
+              const cleanedBase = (baseUrl || "https://kiraai.vn/api/v1").replace(/\/+$/, '');
+              endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
+            }
+            else if (selectedProvider === 'bazaarlink') {
+              const cleanedBase = (baseUrl || "https://api.bazaarlink.ai/v1").replace(/\/+$/, '');
+              endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
+            }
             else if (selectedProvider === 'freellmapi') {
-              const cleanedBase = (base_url || "http://localhost:8080/v1").replace(/\/+$/, '');
+              const cleanedBase = (baseUrl || "http://localhost:8080/v1").replace(/\/+$/, '');
               endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-            } else if (selectedProvider === 'ollama') endpoint = (base_url || "http://localhost:11434") + "/v1/chat/completions";
+            } else if (selectedProvider === 'ollama') endpoint = (baseUrl || "http://localhost:11434") + "/v1/chat/completions";
             else if (selectedProvider === 'custom') {
-              const cleanedBase = (base_url || "https://openrouter.ai/api/v1").replace(/\/+$/, '');
+              const cleanedBase = (baseUrl || "https://openrouter.ai/api/v1").replace(/\/+$/, '');
               endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-            } else if (base_url && !['ollama', 'freellmapi', 'omniroute'].includes(selectedProvider)) {
-              endpoint = base_url + "/chat/completions";
+            } else if (baseUrl && !['ollama', 'freellmapi', 'omniroute'].includes(selectedProvider)) {
+              endpoint = baseUrl + "/chat/completions";
             }
 
             const formattedMessages = [
@@ -770,13 +785,20 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
               body: JSON.stringify({
                 model: selectedModel,
                 messages: formattedMessages,
-                temperature: 0.7
+                temperature: 0.7,
+                max_tokens: 1024
               })
             });
 
             const data = await response.json();
             if (data.choices && data.choices.length > 0) {
-              cauTraLoiAI = data.choices[0].message.content;
+              const msg = data.choices[0].message;
+              // Reasoning models (e.g. BazaarLink deepseek-v4-flash:free) có thể trả content rỗng
+              // nhưng nội dung thật nằm trong field reasoning/reasoning_details
+              cauTraLoiAI = msg.content || msg.reasoning || (msg.reasoning_details && msg.reasoning_details.length > 0 ? msg.reasoning_details.map(r => r.text).filter(Boolean).join('\n') : '') || '';
+              if (!cauTraLoiAI) {
+                cauTraLoiAI = `Phản hồi (chỉ reasoning): ` + JSON.stringify(data).substring(0, 500);
+              }
             } else if (data.error) {
               cauTraLoiAI = `Lỗi từ ${selectedProvider.toUpperCase()}: ${data.error.message || JSON.stringify(data.error)}`;
             } else {
@@ -860,6 +882,7 @@ async function resolveProviderAndKey(req, provider, model_name, client_api_key) 
   let selectedProvider = provider || 'gemini';
   let selectedModel = model_name || 'gemini-1.5-flash';
   let keyToUse = client_api_key;
+  let baseUrl = null;
 
   if (client_api_key && client_api_key.trim()) {
     if (req.user && req.user.role === 'admin') {
@@ -878,6 +901,12 @@ async function resolveProviderAndKey(req, provider, model_name, client_api_key) 
     if (dbKeyRow && dbKeyRow.gia_tri_khoa) keyToUse = dbKeyRow.gia_tri_khoa;
   }
 
+  // Fetch base_url from ai_providers table for custom providers
+  const providerRow = await new Promise((resProv) => {
+    db.get("SELECT base_url FROM ai_providers WHERE ma_nha_cung_cap = ?", [selectedProvider], (err, r) => resProv(r));
+  });
+  if (providerRow && providerRow.base_url) baseUrl = providerRow.base_url;
+
   if (!keyToUse && selectedProvider === 'gemini' && process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'YOUR_GEMINI_API_KEY_HERE') {
     keyToUse = process.env.GEMINI_API_KEY;
   }
@@ -891,7 +920,7 @@ async function resolveProviderAndKey(req, provider, model_name, client_api_key) 
     }
   }
 
-  return { selectedProvider, selectedModel, keyToUse };
+  return { selectedProvider, selectedModel, keyToUse, baseUrl };
 }
 
 // Tách logic build system prompt (lịch sử, memory, role, skills) ra khỏi route
@@ -906,7 +935,7 @@ async function buildChatContext(req, id, mode, noi_dung, user_location) {
   const locationStr = user_location || 'Hà Nội, Việt Nam';
 
   const memoryRows = await new Promise((resMem) => {
-    db.all("SELECT noi_dung FROM bo_nho_dai_han ORDER BY do_uu_tien DESC LIMIT 5", [], (err, r) => resMem(r || []));
+    db.all("SELECT noi_dung FROM bo_nho_dai_han WHERE ma_nguoi_dung = ? ORDER BY do_uu_tien DESC LIMIT 5", [req.user ? req.user.id : GUEST_USER_ID], (err, r) => resMem(r || []));
   });
   const memoryText = memoryRows.map(m => "- " + m.noi_dung).join('\n');
 
@@ -992,6 +1021,12 @@ router.post('/conversations/:id/messages/stream', (req, res, next) => {
     db.run("INSERT INTO tin_nhan (ma_tin_nhan, ma_hoi_thoai, vai_tro, noi_dung) VALUES (?, ?, ?, ?)", [maTinNhanUser, id, vai_tro, noi_dung], () => resolve());
   });
 
+  // FIX GUEST LIMIT: tăng messageCount cho khách khi gửi tin thành công qua stream
+  // (trước đây chỉ tăng ở route non-stream /messages nên khách chat được vô hạn)
+  if (!req.user && req.session) {
+    req.session.messageCount = (req.session.messageCount || 0) + 1;
+  }
+
   // Cập nhật tiêu đề cuộc trò chuyện nếu còn mặc định
   db.get("SELECT tieu_de FROM cuoc_hoi_thoai WHERE ma_hoi_thoai = ?", [id], (err, convRow) => {
     if (convRow && (convRow.tieu_de === 'Trò chuyện mới' || !convRow.tieu_de)) {
@@ -1055,7 +1090,7 @@ router.post('/conversations/:id/messages/stream', (req, res, next) => {
     try {
       const resolved = await resolveProviderAndKey(req, provider, model_name, client_api_key);
       if (resolved.error) { sendSSE({ type: 'error', message: resolved.error }); return endStream(); }
-      const { selectedProvider, selectedModel, keyToUse } = resolved;
+      const { selectedProvider, selectedModel, keyToUse, baseUrl } = resolved;
       const { history, systemPrompt } = await buildChatContext(req, id, mode, noi_dung, user_location);
       if (selectedProvider === 'gemini') {
         const tempGenAI = new GoogleGenerativeAI(keyToUse);
@@ -1063,27 +1098,36 @@ router.post('/conversations/:id/messages/stream', (req, res, next) => {
         try { model = tempGenAI.getGenerativeModel({ model: selectedModel || 'gemini-2.5-flash' }); }
         catch (e) { model = tempGenAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); }
         const contents = history.map(h => ({ role: h.vai_tro === 'user' ? 'user' : 'model', parts: [{ text: h.noi_dung }] }));
-        const genConfig = { thinkingConfig: { thinkingBudget: thinking_level === 'deep' ? 8192 : 0 } };
+        // CHỈ gửi thinkingConfig khi thinking_level = 'deep' (xem ghi chú BUG 400 INVALID_ARGUMENT)
+        const genConfig = thinking_level === 'deep' ? { thinkingConfig: { thinkingBudget: 8192 } } : {};
         const stream = await model.generateContentStream({ contents, systemInstruction: systemPrompt, generationConfig: genConfig });
         for await (const chunk of stream.stream) {
           const t = chunk.text();
           if (t) { fullText += t; sendSSE({ type: 'token', text: t }); }
         }
-      } else if (['openai', 'deepseek', 'groq', 'github', 'freellmapi', 'ollama', 'custom'].includes(selectedProvider)) {
+      } else if (['openai', 'deepseek', 'groq', 'github', 'freellmapi', 'ollama', 'custom', 'kiraai', 'bazaarlink'].includes(selectedProvider)) {
         let endpoint = "https://api.openai.com/v1/chat/completions";
         if (selectedProvider === 'deepseek') endpoint = "https://api.deepseek.com/chat/completions";
         if (selectedProvider === 'groq') endpoint = "https://api.groq.com/openai/v1/chat/completions";
         if (selectedProvider === 'github') endpoint = "https://models.github.ai/inference/chat/completions";
-        if (selectedProvider === 'freellmapi') {
-          const cleanedBase = (base_url || "http://localhost:8080/v1").replace(/\/+$/, '');
+        if (selectedProvider === 'kiraai') {
+          const cleanedBase = (baseUrl || "https://kiraai.vn/api/v1").replace(/\/+$/, '');
           endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
         }
-        if (selectedProvider === 'ollama') endpoint = (base_url || "http://localhost:11434") + "/v1/chat/completions";
-        if (selectedProvider === 'custom') {
-          const cleanedBase = (base_url || "https://openrouter.ai/api/v1").replace(/\/+$/, '');
+        if (selectedProvider === 'bazaarlink') {
+          const cleanedBase = (baseUrl || "https://api.bazaarlink.ai/v1").replace(/\/+$/, '');
           endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-        } else if (base_url && !['ollama', 'freellmapi'].includes(selectedProvider)) {
-          endpoint = base_url + "/chat/completions";
+        }
+        if (selectedProvider === 'freellmapi') {
+          const cleanedBase = (baseUrl || "http://localhost:8080/v1").replace(/\/+$/, '');
+          endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
+        }
+        if (selectedProvider === 'ollama') endpoint = (baseUrl || "http://localhost:11434") + "/v1/chat/completions";
+        if (selectedProvider === 'custom') {
+          const cleanedBase = (baseUrl || "https://openrouter.ai/api/v1").replace(/\/+$/, '');
+          endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
+        } else if (baseUrl && !['ollama', 'freellmapi'].includes(selectedProvider)) {
+          endpoint = baseUrl + "/chat/completions";
         }
         const formattedMessages = [{ role: "system", content: systemPrompt }, ...history.map(h => ({ role: h.vai_tro === 'user' ? 'user' : 'assistant', content: h.noi_dung }))];
         const response = await fetch(endpoint, {

@@ -86,7 +86,7 @@ router.get('/file-content', authMiddleware, (req, res) => {
   }
 });
 
-router.post('/file-content', authMiddleware, (req, res) => {
+router.post('/file-content', [authMiddleware, adminMiddleware], (req, res) => {
   const { path: relPath, content } = req.body;
   if (!relPath) return res.status(400).json({ error: 'Missing file path' });
 

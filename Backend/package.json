@@ -32,10 +32,12 @@
     "mssql": "^12.7.0",
     "multer": "^2.2.0",
     "node-powershell": "^5.0.1",
+    "nodemailer": "^9.0.3",
     "pdf-lib": "^1.17.1",
     "pg": "^8.22.0",
     "playwright": "^1.62.0",
     "pptxgenjs": "^4.0.1",
+    "sqlite3": "^6.0.1",
     "ws": "^8.21.1"
   }
 }

@@ -23,7 +23,7 @@ const getGroqClient = async () => {
   let key = process.env.GROQ_API_KEY;
   if (!key || key === 'YOUR_GROQ_API_KEY_HERE') {
     key = await new Promise((resolve) => {
-      db.get("SELECT TOP 1 gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'groq'", [], (err, row) => {
+      db.get("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'groq' LIMIT 1", [], (err, row) => {
         console.log('[getGroqClient] db result err=', err ? err.message : null, 'row=', row ? row.gia_tri_khoa ? 'HAS_KEY' : 'EMPTY' : 'NONE');
         if (err || !row || !row.gia_tri_khoa) return resolve(null);
         resolve(row.gia_tri_khoa.trim());
@@ -48,7 +48,7 @@ router.get('/skills', authMiddleware, (req, res) => {
 });
 
 // Live Desktop API - Chỉ cho Admin (TỐI ƯU HIỆU NĂNG)
-router.get('/desktop/screenshot', authMiddleware, async (req, res) => {
+router.get('/desktop/screenshot', [authMiddleware, adminMiddleware], async (req, res) => {
   // Sử dụng node-powershell để tạo một tiến trình duy nhất, tránh chi phí khởi tạo lại
   const ps = new Shell({
     executionPolicy: 'Bypass',
@@ -86,7 +86,7 @@ router.get('/desktop/screenshot', authMiddleware, async (req, res) => {
   }
 });
 
-router.post('/desktop/click', authMiddleware, (req, res) => {
+router.post('/desktop/click', [authMiddleware, adminMiddleware], (req, res) => {
   const { x_percent, y_percent } = req.body;
   
   // VALIDATE LINH HOẠT: chấp nhận cả số và string number, chặn string chữ
@@ -202,10 +202,58 @@ router.get('/external/stocks/:symbol', authMiddleware, async (req, res) => {
 });
 
 // Vietnamese TTS API - dùng edge-tts (Python) qua spawn để chống injection
-const VALID_TTS_VOICES = ['vi-VN-HoaiMyNeural', 'vi-VN-NamMinhNeural'];
+const VIETNAMESE_TTS_VOICES = [
+  { id: 'vi-VN-HoaiMyNeural', label: 'Hoài Mỹ (Nữ, Bắc)', gender: 'Nữ', region: 'Bắc' },
+  { id: 'vi-VN-NamMinhNeural', label: 'Nam Minh (Nam, Nam)', gender: 'Nam', region: 'Nam' },
+  { id: 'vi-VN-DuyAnhNeural', label: 'Duy Anh (Nam, Bắc)', gender: 'Nam', region: 'Bắc' },
+  { id: 'vi-VN-HaSanhNeural', label: 'Đà Sanh (Nữ, Nam)', gender: 'Nữ', region: 'Nam' },
+  { id: 'vi-VN-MinhAnhNeural', label: 'Minh Anh (Nữ, Bắc)', gender: 'Nữ', region: 'Bắc' },
+  { id: 'vi-VN-ThuyMinhNeural', label: 'Thùy Minh (Nữ, Nam)', gender: 'Nữ', region: 'Nam' },
+  { id: 'vi-VN-ThiTuyetNeural', label: 'Thị Tuyết (Nữ, Bắc)', gender: 'Nữ', region: 'Bắc' },
+  { id: 'vi-VN-VanHanhNeural', label: 'Vân Hân (Nữ, Nam)', gender: 'Nữ', region: 'Nam' },
+  { id: 'vi-VN-VanMinhNeural', label: 'Văn Minh (Nam, Bắc)', gender: 'Nam', region: 'Bắc' },
+  { id: 'vi-VN-CaoVietNeural', label: 'Cao Việt (Nam, Nam)', gender: 'Nam', region: 'Nam' }
+];
+const VALID_TTS_VOICES = VIETNAMESE_TTS_VOICES.map(v => v.id);
+
+// GET: Lấy danh sách giọng nói TTS tiếng Việt
+router.get('/tts/voices', (req, res) => {
+  const { lang } = req.query;
+  if (lang === 'vi' || !lang) {
+    return res.json({
+      success: true,
+      voices: VIETNAMESE_TTS_VOICES,
+      default: 'vi-VN-HoaiMyNeural'
+    });
+  }
+  res.json({ success: true, voices: [], default: null });
+});
+
+// GET: Kiểm tra trạng thái TTS service
+router.get('/tts/status', async (req, res) => {
+  let edgeTtsAvailable = false;
+  try {
+    edgeTtsAvailable = await new Promise((resolve) => {
+      const spawn = require('child_process').spawn;
+      const proc = spawn('python', ['-c', 'import edge_tts; print("ok")'], { timeout: 10000 });
+      let ok = false;
+      proc.stdout.on('data', d => { if (d.toString().trim() === 'ok') ok = true; });
+      proc.on('close', () => resolve(ok));
+      proc.on('error', () => resolve(false));
+    });
+  } catch {
+    // edge-tts not available
+  }
+  res.json({
+    success: true,
+    edge_tts: edgeTtsAvailable,
+    voices: VIETNAMESE_TTS_VOICES.length,
+    fallback: 'Web Speech API (browser)'
+  });
+});
 
 router.post('/tts', authMiddleware, async (req, res) => {
-  const { text, voice, rate } = req.body;
+  const { text, voice, rate, pitch } = req.body;
   if (!text || !text.trim()) {
     return res.status(400).json({ error: 'Văn bản không được để trống' });
   }
@@ -215,6 +263,8 @@ router.post('/tts', authMiddleware, async (req, res) => {
   
   // Validate rate: chỉ chấp nhận dạng +XX% hoặc -XX%
   const validRate = rate && /^[+-]\d+%$/.test(rate) ? rate : '+0%';
+  // Validate pitch: +XX% or -XX%
+  const validPitch = pitch && /^[+-]\d+%$/.test(pitch) ? pitch : '+0%';
   const maxLength = 1000;
   const trimmedText = text.trim().substring(0, maxLength);
 
@@ -228,6 +278,8 @@ router.post('/tts', authMiddleware, async (req, res) => {
         '-m', 'edge_tts',
         '--voice', voiceName,
         '--text', trimmedText,
+        '--rate', validRate,
+        '--pitch', validPitch,
         '--write-media', tempFile
       ];
       
@@ -282,6 +334,9 @@ router.post('/tts', authMiddleware, async (req, res) => {
         audio: base64Audio,
         format: 'mp3',
         voice: voiceName,
+        voice_label: VIETNAMESE_TTS_VOICES.find(v => v.id === voiceName)?.label || voiceName,
+        rate: validRate,
+        pitch: validPitch,
         text_length: trimmedText.length
       });
     } else {
@@ -905,7 +960,7 @@ router.post('/transcribe', authMiddleware, upload.single('audio'), async (req, r
 // ========== BROWSER STREAM ROUTES ==========
 const browserStream = require('../services/browserStream');
 
-router.post('/browser/launch', async (req, res) => {
+router.post('/browser/launch', authMiddleware, async (req, res) => {
   try {
     const { url } = req.body;
     const result = await browserStream.launch({ url: url || 'about:blank' });
@@ -915,7 +970,7 @@ router.post('/browser/launch', async (req, res) => {
   }
 });
 
-router.post('/browser/navigate', async (req, res) => {
+router.post('/browser/navigate', authMiddleware, async (req, res) => {
   try {
     const { url } = req.body;
     const result = await browserStream.navigate(url);
@@ -925,7 +980,7 @@ router.post('/browser/navigate', async (req, res) => {
   }
 });
 
-router.post('/browser/click', async (req, res) => {
+router.post('/browser/click', authMiddleware, async (req, res) => {
   try {
     const { x, y } = req.body;
     const result = await browserStream.click(x, y);
@@ -935,7 +990,7 @@ router.post('/browser/click', async (req, res) => {
   }
 });
 
-router.post('/browser/type', async (req, res) => {
+router.post('/browser/type', authMiddleware, async (req, res) => {
   try {
     const { text } = req.body;
     const result = await browserStream.type(text);
@@ -945,7 +1000,7 @@ router.post('/browser/type', async (req, res) => {
   }
 });
 
-router.post('/browser/key', async (req, res) => {
+router.post('/browser/key', authMiddleware, async (req, res) => {
   try {
     const { key } = req.body;
     const result = await browserStream.key(key);
@@ -955,7 +1010,7 @@ router.post('/browser/key', async (req, res) => {
   }
 });
 
-router.post('/browser/scroll', async (req, res) => {
+router.post('/browser/scroll', authMiddleware, async (req, res) => {
   try {
     const { deltaX, deltaY } = req.body;
     const result = await browserStream.scroll(deltaX, deltaY);
@@ -965,7 +1020,7 @@ router.post('/browser/scroll', async (req, res) => {
   }
 });
 
-router.post('/browser/close', async (req, res) => {
+router.post('/browser/close', authMiddleware, async (req, res) => {
   try {
     await browserStream.close();
     res.json({ success: true });
@@ -974,7 +1029,7 @@ router.post('/browser/close', async (req, res) => {
   }
 });
 
-router.get('/browser/status', (req, res) => {
+router.get('/browser/status', authMiddleware, (req, res) => {
   res.json(browserStream.getStatus());
 });
 
