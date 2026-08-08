@@ -10,6 +10,11 @@ const { stripAnsi, AnsiStreamCleaner } = require('../utils/stripAnsi');
 const { authMiddleware, adminMiddleware, guestMiddleware, guestAgentMiddleware, getGuestLimits } = require('../middleware/auth.middleware');
 const { GUEST_USER_ID } = require('../ensure-admin');
 
+// ─── AI REXI BRAIN INTEGRATION ────────────────────────────────
+const brain = require('../services/brain/intelligence/intelligence');
+const { extractEntities } = require('../services/brain/nlp/entity-extractor');
+const { loadSmartMemory, updateProfileFromMessage, saveMemoryAuto } = brain;
+
 // --- CONFIGURATION ---
 const OPENCODE_BIN_PATH = process.env.OPENCODE_BIN_PATH || (process.env.USERPROFILE ? require("path").join(process.env.USERPROFILE, ".opencode", "bin", "opencode.exe") : "");
 const IS_OPENCODE_AVAILABLE = fs.existsSync(OPENCODE_BIN_PATH);
@@ -627,10 +632,30 @@ router.post('/conversations/:id/messages', (req, res, next) => {
         const nowFormatted = now.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
         const locationStr = user_location || 'Hà Nội, Việt Nam';
 
-        const memoryRows = await new Promise((resMem) => {
-          db.all("SELECT noi_dung FROM bo_nho_dai_han WHERE ma_nguoi_dung = ? ORDER BY do_uu_tien DESC LIMIT 5", [req.user ? req.user.id : GUEST_USER_ID], (err, r) => resMem(r || []));
-        });
-        const memoryText = memoryRows.map(m => "- " + m.noi_dung).join('\n');
+        const userIdForBrain = req.user ? req.user.id : GUEST_USER_ID;
+        const messageText = noi_dung;
+
+        // --- AI REXI BRAIN: tự lưu memory + cập nhật profile (fire-and-forget, không chặn chat) ---
+        try {
+          const _brainEnt = extractEntities(messageText);
+          if (_brainEnt) {
+            Promise.resolve(saveMemoryAuto(userIdForBrain, messageText)).catch(() => {});
+            Promise.resolve(updateProfileFromMessage(userIdForBrain, _brainEnt)).catch(() => {});
+          }
+        } catch (e) { /* brain không bao giờ được chặn chat */ }
+
+        // --- AI REXI BRAIN: load memory thông minh (priority + keyword match) + profile ---
+        let memoryText = '';
+        let profileText = '';
+        try {
+          const memResult = await loadSmartMemory(userIdForBrain, messageText);
+          memoryText = memResult ? memResult.text : '';
+        } catch (e) {}
+        try {
+          const profile = await brain.getProfile(userIdForBrain);
+          profileText = profile ? brain.formatToPromptText(profile) : '';
+        } catch (e) { /* brain không bao giờ được chặn chat */ }
+        if (memoryText) console.log('[Brain] Memory loaded:', memoryText.slice(0, 200));
 
         const SPECIALTY_PROMPTS = {
           general: 'Bạn là Rexi, Siêu Trợ Lý AI Toàn Năng giúp giải quyết mọi câu hỏi cuộc sống, công việc, văn phòng và phân tích.',
@@ -696,7 +721,8 @@ router.post('/conversations/:id/messages', (req, res, next) => {
         }
 
         let systemPrompt = `${currentRolePrompt} Bây giờ là ${nowFormatted} (Giờ Việt Nam). Vị trí địa lý ước tính của người dùng: ${locationStr}.
-
+${profileText || ''
+}
 BỘ NHỚ DÀI HẠN VỀ NGƯỜI DÙNG & QUY TẮC CỦA REXI:
 ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dung ngắn gọn, súc tích, thực tế và chính xác.'}
 
