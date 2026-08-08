@@ -38,7 +38,10 @@ router.get('/', (req, res) => {
     sql += ' AND LOWER(m.ma_nha_cung_cap) = LOWER(?)';
     params.push(provider);
   }
-  sql += ' ORDER BY m.thu_tu_hien_thi ASC, m.ten_hien_thi ASC';
+  // Sắp xếp: provider theo thứ tự key trong khoa_api (giống trang Admin), model theo tên A→Z
+  sql += ` ORDER BY
+    COALESCE((SELECT MIN(k.rowid) FROM khoa_api k WHERE LOWER(k.ten_nha_cung_cap) = LOWER(m.ma_nha_cung_cap)), 999999) ASC,
+    m.ten_hien_thi ASC`;
 
   db.all(sql, params, (err, rows) => {
     if (err) return res.status(500).json({ success: false, error: err.message });
@@ -49,9 +52,10 @@ router.get('/', (req, res) => {
         EXISTS (SELECT 1 FROM khoa_api k WHERE LOWER(k.ten_nha_cung_cap) = LOWER(c.ma_nha_cung_cap))
         OR EXISTS (SELECT 1 FROM ai_providers p2 WHERE LOWER(p2.ma_nha_cung_cap) = LOWER(c.ma_nha_cung_cap) AND p2.can_api_key = 0 AND p2.kich_hoat = 1)
       )`;
+      const orderBy = `ORDER BY COALESCE((SELECT MIN(k.rowid) FROM khoa_api k WHERE LOWER(k.ten_nha_cung_cap) = LOWER(c.ma_nha_cung_cap)), 999999) ASC, c.ma_model ASC`;
       const cacheSql = provider
-        ? `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache c WHERE trang_thai = 'working' AND LOWER(c.ma_nha_cung_cap) = LOWER(?) AND ${keyOrKeyless}`
-        : `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache c WHERE trang_thai = 'working' AND ${keyOrKeyless}`;
+        ? `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache c WHERE trang_thai = 'working' AND LOWER(c.ma_nha_cung_cap) = LOWER(?) AND ${keyOrKeyless} ${orderBy}`
+        : `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache c WHERE trang_thai = 'working' AND ${keyOrKeyless} ${orderBy}`;
       const cacheParams = provider ? [provider] : [];
 
       return db.all(cacheSql, cacheParams, (err2, cacheRows) => {
