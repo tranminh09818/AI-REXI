@@ -597,9 +597,6 @@ export default function AdminPage() {
                               <div className="flex items-center gap-2 min-w-0">
                                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${model.kich_hoat ? 'bg-emerald-400' : 'bg-slate-600'}`}></span>
                                 <span className="text-xs text-slate-300 truncate">{model.ten_hien_thi}</span>
-                                <span className={`px-1 py-0.5 rounded text-[9px] font-medium ${model.loai === 'free' ? 'bg-emerald-500/15 text-emerald-300' : model.loai === 'paid' ? 'bg-amber-500/15 text-amber-300' : 'bg-rose-500/15 text-rose-300'}`}>
-                                  {model.loai === 'free' ? '✅ Free' : model.loai === 'paid' ? '💰 Paid' : '⚠️ Error'}
-                                </span>
                               </div>
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button onClick={() => toggleModelOnHome(model.ma_model, model.kich_hoat)}

@@ -182,7 +182,6 @@ const ModelSelectorPopover = ({ availableModels, modelName, setModelName, setPro
                     <div className="space-y-1">
                       {models.map(m => {
                         const isSelected = m.id === modelName;
-                        const isPro = m.type === 'pro' || m.id.includes('pro') || m.id.includes('gpt-4') || m.id.includes('sonnet');
                         return (
                           <button
                             key={m.id}
@@ -202,16 +201,6 @@ const ModelSelectorPopover = ({ availableModels, modelName, setModelName, setPro
                             </div>
 
                             <div className="flex items-center gap-1.5 shrink-0">
-                              {isPro ? (
-                                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                                  PRO
-                                </span>
-                              ) : (
-                                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                  FREE
-                                </span>
-                              )}
-
                               {isSelected && (
                                 <Check size={14} className="text-cyan-400 font-bold ml-1" />
                               )}
