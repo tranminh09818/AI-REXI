@@ -400,27 +400,48 @@ async function scanOnStartup() {
   return summary;
 }
 
-// ─── Giờ quét cố định hàng ngày (cấu hình được từ Admin) ─────────────
-// Mặc định 3:00 AM. Lưu trong bảng app_settings (key-value).
-const DEFAULT_SCAN_HOUR = 3;
+// ─── Thời gian quét cố định hàng ngày (cấu hình được từ Admin) ────────
+// Mặc định 3:00 AM. Lưu HH:MM (vd '03:30') trong bảng app_settings (key-value).
+const DEFAULT_SCAN_TIME = '03:00';
 
-function getScanHour() {
+// Chuyển đổi giá trị lưu trong DB thành { hour, minute }.
+// Hỗ trợ cả dữ liệu cũ ('3' / 5 = giờ nguyên) lẫn mới ('03:30').
+function normalizeScanTime(raw) {
+  const s = String(raw ?? '').trim();
+  if (/^\d{1,2}$/.test(s)) {
+    const h = parseInt(s, 10);
+    return (h >= 0 && h <= 23) ? { hour: h, minute: 0 } : { hour: 3, minute: 0 };
+  }
+  const m = s.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (m) {
+    const h = parseInt(m[1], 10);
+    const mi = parseInt(m[2], 10);
+    if (h >= 0 && h <= 23 && mi >= 0 && mi <= 59) return { hour: h, minute: mi };
+  }
+  return { hour: 3, minute: 0 };
+}
+
+function getScanTime() {
   try {
     const d = getDB();
-    if (!d) return DEFAULT_SCAN_HOUR;
+    if (!d) return normalizeScanTime(DEFAULT_SCAN_TIME);
     d.exec(`CREATE TABLE IF NOT EXISTS app_settings (
       khoa TEXT PRIMARY KEY,
       gia_tri TEXT
     )`);
-    const row = d.prepare("SELECT gia_tri FROM app_settings WHERE khoa = 'model_scan_hour'").get();
-    const h = parseInt(row?.gia_tri, 10);
-    return (h >= 0 && h <= 23) ? h : DEFAULT_SCAN_HOUR;
-  } catch(e) { return DEFAULT_SCAN_HOUR; }
+    const row = d.prepare("SELECT gia_tri FROM app_settings WHERE khoa = 'model_scan_time'").get();
+    if (row) return normalizeScanTime(row.gia_tri);
+    // Tương thích dữ liệu cũ: key 'model_scan_hour' (giờ nguyên)
+    const oldRow = d.prepare("SELECT gia_tri FROM app_settings WHERE khoa = 'model_scan_hour'").get();
+    if (oldRow) return normalizeScanTime(oldRow.gia_tri);
+    return normalizeScanTime(DEFAULT_SCAN_TIME);
+  } catch(e) { return normalizeScanTime(DEFAULT_SCAN_TIME); }
 }
 
-function setScanHour(hour) {
+function setScanTime(hour, minute) {
   const h = parseInt(hour, 10);
-  if (!(h >= 0 && h <= 23)) return false;
+  const m = parseInt(minute ?? 0, 10);
+  if (!(h >= 0 && h <= 23) || !(m >= 0 && m <= 59)) return false;
   try {
     const d = getDB();
     if (!d) return false;
@@ -428,18 +449,25 @@ function setScanHour(hour) {
       khoa TEXT PRIMARY KEY,
       gia_tri TEXT
     )`);
-    d.prepare(`INSERT INTO app_settings (khoa, gia_tri) VALUES ('model_scan_hour', ?)
-      ON CONFLICT(khoa) DO UPDATE SET gia_tri = excluded.gia_tri`).run(String(h));
+    const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    d.prepare(`INSERT INTO app_settings (khoa, gia_tri) VALUES ('model_scan_time', ?)
+      ON CONFLICT(khoa) DO UPDATE SET gia_tri = excluded.gia_tri`).run(timeStr);
+    // Dọn key cũ (nếu tồn tại từ bản trước)
+    try { d.prepare(`DELETE FROM app_settings WHERE khoa = 'model_scan_hour'`).run(); } catch(e) {}
     return true;
   } catch(e) { return false; }
 }
 
-// Tính số ms tới lần quét kế tiếp theo giờ cố định (mặc định 3:00 AM)
-function msUntilNextScanHour() {
-  const hour = getScanHour();
+// Tương thích ngược: giữ hàm cũ dùng cho log/API cũ
+function getScanHour() { return getScanTime().hour; }
+function setScanHour(hour) { return setScanTime(hour, 0); }
+
+// Tính số ms tới lần quét kế tiếp theo thời gian cố định (mặc định 3:00 AM)
+function msUntilNextScanTime() {
+  const { hour, minute } = getScanTime();
   const now = new Date();
   const next = new Date(now);
-  next.setHours(hour, 0, 0, 0);
+  next.setHours(hour, minute, 0, 0);
   if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1); // nếu đã qua giờ hôm nay → ngày mai
   return next.getTime() - now.getTime();
 }
@@ -449,9 +477,9 @@ let pendingScanTimer = null;
 let schedulerStarted = false;
 
 const scheduleNextScan = () => {
-  const waitMs = msUntilNextScanHour();
-  const hour = getScanHour();
-  console.log(`[ModelScanner] Scheduler: lần quét kế tiếp lúc ${String(hour).padStart(2, '0')}:00 (${Math.round(waitMs / 60000)} phút nữa)`);
+  const waitMs = msUntilNextScanTime();
+  const { hour, minute } = getScanTime();
+  console.log(`[ModelScanner] Scheduler: lần quét kế tiếp lúc ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} (${Math.round(waitMs / 60000)} phút nữa)`);
   pendingScanTimer = setTimeout(async () => {
     try {
       await scanAllProviders();
@@ -477,7 +505,8 @@ function startModelScannerScheduler() {
   schedulerStarted = true;
   scheduleNextScan();
 
-  console.log(`[ModelScanner] Scheduler started: startup scan in 5s, then daily at ${getScanHour()}:00`);
+  const t = getScanTime();
+  console.log(`[ModelScanner] Scheduler started: startup scan in 5s, then daily at ${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`);
 }
 
-module.exports = { startModelScannerScheduler, scanAllProviders, scanOnStartup, scanProvider, PROVIDER_ENDPOINTS, getScanHour, setScanHour, rescheduleModelScan };
+module.exports = { startModelScannerScheduler, scanAllProviders, scanOnStartup, scanProvider, PROVIDER_ENDPOINTS, getScanHour, setScanHour, getScanTime, setScanTime, rescheduleModelScan };

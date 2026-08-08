@@ -506,9 +506,9 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
   const [scanCache, setScanCache] = useState({}); // { provider: { working: [], failed: [] } }
   const [providerScanLog, setProviderScanLog] = useState({}); // { provider: lastScanTime }
   const [lastFullScan, setLastFullScan] = useState(null);
-  const [scanHour, setScanHour] = useState(3); // giờ tự động quét (mặc định 3:00 AM)
-  const [newScanHour, setNewScanHour] = useState(3);
-  const [savingScanHour, setSavingScanHour] = useState(false);
+  const [scanTime, setScanTime] = useState('03:00'); // thời gian tự động quét (mặc định 3:00 AM)
+  const [newScanTime, setNewScanTime] = useState('03:00');
+  const [savingScanTime, setSavingScanTime] = useState(false);
 
   const fetchKeys = async () => {
     setLoading(true);
@@ -538,18 +538,18 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
   const fetchScanSchedule = async () => {
     try {
       const data = await apiFetch('/models/admin/models/scan-schedule', token);
-      if (data.success) { setScanHour(data.hour); setNewScanHour(data.hour); }
+      if (data.success) { setScanTime(data.time || '03:00'); setNewScanTime(data.time || '03:00'); }
     } catch { /* mặc định 3:00 AM */ }
   };
 
   const saveScanSchedule = async () => {
-    setSavingScanHour(true);
+    setSavingScanTime(true);
     try {
-      const res = await apiFetch('/models/admin/models/scan-schedule', token, { method: 'POST', body: JSON.stringify({ hour: newScanHour }) });
-      if (res.success) { setScanHour(res.hour); showToast(res.message || 'Đã lưu giờ quét ✅'); }
-      else showToast(res.message || 'Lỗi lưu giờ quét', 'error');
+      const res = await apiFetch('/models/admin/models/scan-schedule', token, { method: 'POST', body: JSON.stringify({ time: newScanTime }) });
+      if (res.success) { setScanTime(res.time || newScanTime); showToast(res.message || 'Đã lưu thời gian quét ✅'); }
+      else showToast(res.message || 'Lỗi lưu thời gian quét', 'error');
     } catch (e) { showToast(e.message, 'error'); }
-    finally { setSavingScanHour(false); }
+    finally { setSavingScanTime(false); }
   };
 
   useEffect(() => { fetchKeys(); fetchScanCache(); fetchScanSchedule(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -648,20 +648,20 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
             <Clock size={11} className="text-cyan-400" />
             Tự động quét
             <input
-              type="number" min="0" max="23"
-              aria-label="Giờ tự động quét model"
-              value={newScanHour}
-              onChange={e => setNewScanHour(Math.min(23, Math.max(0, parseInt(e.target.value || '0', 10))))}
-              title="Giờ quét (0-23)"
-              className="w-10 bg-[#131417] border border-cyan-500/30 rounded-md px-1 py-0.5 text-center text-slate-200 focus:outline-none focus:border-cyan-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              type="time"
+              aria-label="Thời gian tự động quét model"
+              value={newScanTime}
+              onChange={e => setNewScanTime(e.target.value || '03:00')}
+              title="Chọn giờ quét (HH:MM)"
+              className="w-[72px] bg-[#131417] border border-cyan-500/30 rounded-md px-1 py-0.5 text-center text-slate-200 focus:outline-none focus:border-cyan-500 [color-scheme:dark]"
             />
-            :00 hàng ngày
+            hàng ngày
             <button
               type="button"
               onClick={saveScanSchedule}
-              disabled={savingScanHour || scanHour === newScanHour}
+              disabled={savingScanTime || scanTime === newScanTime}
               className="px-2 py-0.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded-md font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
-            >{savingScanHour ? '...' : 'Lưu'}</button>
+            >{savingScanTime ? '...' : 'Lưu'}</button>
           </span>
           <button
             onClick={async () => {
