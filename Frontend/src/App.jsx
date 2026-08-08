@@ -78,12 +78,12 @@ const ModelSelectorPopover = ({ availableModels, modelName, setModelName, setPro
   }, []);
 
   const activeModelObj = useMemo(() => {
-    return availableModels.find(m => m.id === modelName) || {
-      id: modelName || 'gemini-2.5-flash',
-      name: modelName || 'Gemini 2.5 Flash',
-      provider: 'gemini',
-      type: 'free'
-    };
+    // 🔄 Ưu tiên model thật đang được chọn; nếu model cũ đã bị xóa (không còn trong danh sách mới)
+    // → KHÔNG hiển thị model giả/cũ — tự chọn model thật đầu tiên (hoặc trạng thái 'đang tải')
+    const found = availableModels.find(m => m.id === modelName);
+    if (found) return found;
+    if (availableModels.length > 0) return availableModels[0];
+    return { id: modelName || '', name: modelName || 'Đang tải model...', provider: '', type: 'free' };
   }, [availableModels, modelName]);
 
   const groupedModels = useMemo(() => {
@@ -595,6 +595,14 @@ export default function App() {
     };
     evtSource.onerror = () => {};
     return () => evtSource.close();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 🔄 Auto-refresh danh sách model mỗi 60s — đảm bảo tab đang mở vẫn tự cập nhật model mới
+  // khi Admin quét xong (không cần F5, không phụ thuộc duy nhất vào SSE)
+  useEffect(() => {
+    fetchAvailableModels();
+    const timer = setInterval(fetchAvailableModels, 60000);
+    return () => clearInterval(timer);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchGuestLimits = async () => {
