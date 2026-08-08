@@ -539,8 +539,23 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
     try {
       // FIX: /chat/keys thay vì /models/keys
       await apiFetch('/chat/keys', token, { method: 'POST', body: JSON.stringify({ provider: newProvider, api_key: newKey }) });
-      showToast('Đã lưu API Key ✅');
+      showToast('Đã lưu API Key ✅ — đang tự động quét model...');
       setNewKey(''); fetchKeys();
+      // 🔄 Tự động quét ngay provider vừa lưu key để model working mới cập nhật vào DB + trang chủ
+      setScanningProvider(newProvider);
+      try {
+        await apiFetch('/models/admin/models/scan-provider', token, {
+          method: 'POST',
+          body: JSON.stringify({ provider: newProvider })
+        });
+        await fetchScanCache();
+        showToast('✅ Quét xong ' + newProvider + ' — đã cập nhật model hoạt động lên trang chủ!');
+        window.dispatchEvent(new CustomEvent('rexi_models_published'));
+      } catch (scanErr) {
+        showToast('Đã lưu key nhưng quét model lỗi: ' + scanErr.message, 'error');
+      } finally {
+        setScanningProvider(null);
+      }
     } catch (e) { showToast(e.message, 'error'); }
   };
 

@@ -14,28 +14,6 @@ try {
   db.run(`DELETE FROM model_scan_cache WHERE ma_nha_cung_cap IN ('bazaarlink', 'kiraai', 'ollama', 'freellmapi', 'tokenrouter')`);
   db.run(`UPDATE ai_models SET kich_hoat = 0 WHERE ma_nha_cung_cap IN ('bazaarlink', 'kiraai', 'ollama', 'freellmapi', 'tokenrouter')`);
   db.run(`UPDATE ai_providers SET kich_hoat = 0 WHERE ma_nha_cung_cap IN ('tokenrouter')`);
-
-  const defaultSeedModels = [
-    { id: 'gemini-1.5-flash', provider: 'gemini', name: 'Gemini 1.5 Flash', type: 'free' },
-    { id: 'gemini-2.0-flash-exp', provider: 'gemini', name: 'Gemini 2.0 Flash Exp', type: 'free' },
-    { id: 'gemini-1.5-pro', provider: 'gemini', name: 'Gemini 1.5 Pro', type: 'pro' },
-    { id: 'llama-3.3-70b-versatile', provider: 'groq', name: 'Llama 3.3 70B', type: 'pro' },
-    { id: 'mixtral-8x7b-32768', provider: 'groq', name: 'Mixtral 8x7B', type: 'free' },
-    { id: 'deepseek-chat', provider: 'deepseek', name: 'DeepSeek V3', type: 'pro' },
-    { id: 'deepseek-reasoner', provider: 'deepseek', name: 'DeepSeek R1', type: 'pro' },
-    { id: 'opencode/deepseek-v4-flash-free', provider: 'opencode', name: 'DeepSeek V4 Flash (Free)', type: 'free' },
-    { id: 'gpt-4o-mini', provider: 'openai', name: 'GPT-4o Mini', type: 'free' },
-    { id: 'gpt-4o', provider: 'openai', name: 'GPT-4o', type: 'pro' }
-  ];
-
-  for (const m of defaultSeedModels) {
-    db.run(
-      `INSERT INTO ai_models (ma_model, ma_nha_cung_cap, ten_hien_thi, loai, thu_tu_hien_thi, kich_hoat)
-       VALUES (?, ?, ?, ?, 0, 1)
-       ON CONFLICT(ma_model) DO UPDATE SET kich_hoat = 1, ma_nha_cung_cap = excluded.ma_nha_cung_cap`,
-      [m.id, m.provider, m.name, m.type]
-    );
-  }
 } catch(e) {}
 
 // ─── Public: lấy danh sách models đang hoạt động ─────────────
@@ -83,29 +61,8 @@ router.get('/', (req, res) => {
           return res.json({ success: true, models: Object.fromEntries(map) });
         }
 
-        // Fallback mặc định khi chưa quét bất kỳ model nào
-        const DEFAULTS = {
-          gemini: [
-            { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', type: 'free', provider: 'gemini' },
-            { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', type: 'pro', provider: 'gemini' },
-            { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash Exp', type: 'free', provider: 'gemini' }
-          ],
-          groq: [
-            { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B', type: 'pro', provider: 'groq' },
-            { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B', type: 'free', provider: 'groq' }
-          ],
-          openai: [
-            { id: 'gpt-4o', name: 'GPT-4o', type: 'pro', provider: 'openai' },
-            { id: 'gpt-4o-mini', name: 'GPT-4o Mini', type: 'free', provider: 'openai' }
-          ],
-          deepseek: [
-            { id: 'deepseek-chat', name: 'DeepSeek V3', type: 'pro', provider: 'deepseek' },
-            { id: 'deepseek-reasoner', name: 'DeepSeek R1', type: 'pro', provider: 'deepseek' }
-          ]
-        };
-        const pKey = (provider || 'gemini').toLowerCase();
-        const resMap = DEFAULTS[pKey] ? { [pKey]: DEFAULTS[pKey] } : DEFAULTS;
-        return res.json({ success: true, models: resMap });
+        // KHÔNG dùng dữ liệu mẫu — trả danh sách rỗng để UI hiển thị "chưa có model hoạt động"
+        return res.json({ success: true, models: {} });
       });
     }
 
@@ -282,6 +239,8 @@ router.post('/admin/models/sync', [authMiddleware, adminMiddleware], async (req,
     const result = await fetchModelsFromProvider(provider, (api_key || '').trim(), (base_url || '').trim());
     if (!result.success) return res.json({ success: false, error: result.error });
 
+    // LƯU Ý: sync chỉ fetch danh sách KHÔNG verify health → KHÔNG xóa model cũ (tránh mất model working);
+    // dùng scan-provider / verify-and-scan (có health check) để áp dụng chính sách thay thế model.
     for (const modelId of result.models) {
       const displayName = modelId.includes('/') ? modelId.split('/').pop() : modelId;
       db.run(
@@ -631,6 +590,10 @@ router.post('/admin/models/verify-and-scan', [authMiddleware, adminMiddleware], 
         );
       }
 
+      // 🔄 REPLACE POLICY: Xóa toàn bộ model cũ + cache của provider trước khi lưu model working mới
+      db.run('DELETE FROM ai_models WHERE ma_nha_cung_cap = ?', [resolvedProvider]);
+      db.run('DELETE FROM model_scan_cache WHERE ma_nha_cung_cap = ?', [resolvedProvider]);
+
       for (const m of workingResults) {
         const modelId = m.id;
         const displayName = modelId.includes('/') ? modelId.split('/').pop() : modelId;
@@ -699,9 +662,9 @@ router.post('/admin/models/publish-active', [authMiddleware, adminMiddleware], a
       );
     }
 
-    // 2. Vô hiệu hóa tạm thời các model cũ của provider này
-    db.run('UPDATE ai_models SET kich_hoat = 0 WHERE ma_nha_cung_cap = ?', [provider], (err) => {
-      if (err) console.error('[PublishModels] Deactivate old models error:', err.message);
+    // 2. 🔄 REPLACE POLICY: Xóa hẳn các model cũ của provider này (chỉ giữ model working mới được đăng tải)
+    db.run('DELETE FROM ai_models WHERE ma_nha_cung_cap = ?', [provider], (err) => {
+      if (err) console.error('[PublishModels] Delete old models error:', err.message);
 
       // 3. Đăng ký & Kích hoạt các model đang hoạt động
       let savedCount = 0;
@@ -768,7 +731,7 @@ router.post('/admin/models/clear-and-reset', [authMiddleware, adminMiddleware], 
     const path = require('path');
     const d = new Database(path.join(__dirname, '..', '..', '..', 'Database', 'tro_ly_ai.db'));
     d.exec("DELETE FROM model_scan_cache; DELETE FROM provider_scan_log;");
-    d.prepare("UPDATE ai_models SET kich_hoat = 0 WHERE ma_model != 'gemini-3.6-flash'").run();
+    d.exec("DELETE FROM ai_models;");
     d.close();
     if (typeof global !== 'undefined' && global.__modelScanComplete) {
       global.__modelScanComplete({ action: 'reset' });

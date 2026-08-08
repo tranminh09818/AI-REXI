@@ -209,19 +209,6 @@ function saveScanResult(providerId, modelId, status, latencyMs, errorMsg) {
         thoi_gian_quet = datetime('now')
     `).run(modelId, providerId, status, latencyMs || 0, errorMsg || null);
     
-    // Auto-publish working models
-    if (status === 'working') {
-      const displayName = modelId.includes('/') ? modelId.split('/').pop() : modelId;
-      const type = (modelId.includes('pro') || modelId.includes('gpt-4') || modelId.includes('opus') || modelId.includes('sonnet')) ? 'pro' : 'free';
-      d.prepare(`
-        INSERT INTO ai_models (ma_model, ma_nha_cung_cap, ten_hien_thi, loai, thu_tu_hien_thi, kich_hoat)
-        VALUES (?, ?, ?, ?, 0, 1)
-        ON CONFLICT(ma_model) DO UPDATE SET kich_hoat = 1, ten_hien_thi = excluded.ten_hien_thi, ngay_cap_nhat = CURRENT_TIMESTAMP
-      `).run(modelId, providerId, displayName, type);
-    } else {
-      // Disable failed models
-      d.prepare(`UPDATE ai_models SET kich_hoat = 0 WHERE ma_model = ? AND ma_nha_cung_cap = ?`).run(modelId, providerId);
-    }
   } catch(e) {
     console.error('[ModelScanner] Save error:', e.message);
   }
@@ -269,6 +256,7 @@ async function scanProvider(providerId) {
     console.error(`[ModelScanner] ${cfg.name}: no models returned`);
     return { success: false, error: 'No models returned from API', provider: providerId };
   }
+
 
   console.log(`[ModelScanner] ${cfg.name}: ${models.length} models found. Testing health...`);
 
@@ -323,8 +311,39 @@ async function scanProvider(providerId) {
     saveProviderScanTime(providerId);
   }
 
-  const working = results.filter(r => r.status === 'working').length;
+  const workingList = results.filter(r => r.status === 'working');
+  const working = workingList.length;
   console.log(`[ModelScanner] ${cfg.name}: ${working}/${results.length} working`);
+
+  // 🔄 REPLACE POLICY (an toàn): Chỉ khi lượt quét mới có ≥1 model working thì mới thay thế toàn bộ model cũ
+  // của provider bằng đúng danh sách working mới (transaction để delete+insert nguyên tử).
+  // Nếu 0 working (key lỗi / lỗi mạng tạm thời) → GIỮ NGUYÊN model cũ đang hoạt động, tránh mất trắng provider.
+  if (working > 0) {
+    try {
+      const d = getDB();
+      if (d) {
+        const replaceTx = d.transaction(() => {
+          d.prepare('DELETE FROM ai_models WHERE ma_nha_cung_cap = ?').run(providerId);
+          const ins = d.prepare(`
+            INSERT INTO ai_models (ma_model, ma_nha_cung_cap, ten_hien_thi, loai, thu_tu_hien_thi, kich_hoat)
+            VALUES (?, ?, ?, ?, 0, 1)
+          `);
+          for (const m of workingList) {
+            const modelId = m.id;
+            const displayName = modelId.includes('/') ? modelId.split('/').pop() : modelId;
+            const type = (modelId.includes('pro') || modelId.includes('gpt-4') || modelId.includes('opus') || modelId.includes('sonnet')) ? 'pro' : 'free';
+            ins.run(modelId, providerId, displayName, type);
+          }
+        });
+        replaceTx();
+        console.log(`[ModelScanner] ${cfg.name}: đã replace ${working} model working mới vào DB (xóa model cũ)`);
+      }
+    } catch (repErr) {
+      console.error(`[ModelScanner] ${cfg.name} replace models error:`, repErr.message);
+    }
+  } else {
+    console.warn(`[ModelScanner] ${cfg.name}: 0 model working trong lượt quét này — giữ nguyên model cũ đang hoạt động`);
+  }
 
   return { success: true, provider: providerId, total: results.length, working, results };
 }
