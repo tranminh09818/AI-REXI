@@ -823,4 +823,28 @@ router.get('/admin/models/scan-cache', [authMiddleware, adminMiddleware], (req, 
   }
 });
 
+// ─── Admin: Giờ tự động quét model (mặc định 3:00 AM, đổi được) ──
+// GET /api/models/admin/models/scan-schedule
+router.get('/admin/models/scan-schedule', [authMiddleware, adminMiddleware], (req, res) => {
+  try {
+    const { getScanHour } = require('../model-scanner.scheduler');
+    res.json({ success: true, hour: getScanHour() });
+  } catch(e) {
+    res.json({ success: true, hour: 3 });
+  }
+});
+
+// POST /api/models/admin/models/scan-schedule  body: { hour: 0-23 }
+router.post('/admin/models/scan-schedule', [authMiddleware, adminMiddleware], (req, res) => {
+  const hour = parseInt(req.body?.hour, 10);
+  if (!(hour >= 0 && hour <= 23)) {
+    return res.status(400).json({ success: false, message: 'Giờ quét phải từ 0 đến 23' });
+  }
+  const { setScanHour, rescheduleModelScan } = require('../model-scanner.scheduler');
+  const ok = setScanHour(hour);
+  if (!ok) return res.status(500).json({ success: false, message: 'Không lưu được giờ quét' });
+  try { rescheduleModelScan(); } catch(e) { /* scheduler chưa bật thì lần restart sau sẽ dùng giờ mới */ }
+  res.json({ success: true, hour, message: `Đã lưu: tự động quét lúc ${String(hour).padStart(2, '0')}:00 hàng ngày` });
+});
+
 module.exports = router;

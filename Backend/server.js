@@ -140,8 +140,8 @@ const server = app.listen(PORT, () => {
     startScheduler();
   }
   startGitHubScheduler();
-  // Auto-scan: quét ngay khi server khởi động (sau 5s) rồi lặp lại mỗi 6h
-  // Không cố định vào 3:00 AM — mỗi 6h tính từ lúc server bật
+  // Auto-scan: quét ngay khi server khởi động (sau 5s) + quét vào giờ cố định hàng ngày
+  // Mặc định 3:00 AM, có thể đổi giờ từ Admin (API /models/admin/models/scan-schedule)
   startModelScannerScheduler();
 });
 

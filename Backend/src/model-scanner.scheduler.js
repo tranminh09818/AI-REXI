@@ -400,21 +400,84 @@ async function scanOnStartup() {
   return summary;
 }
 
-// Khởi động cron job tự động mỗi 6h
-function startModelScannerScheduler() {
-  const SIX_HOURS = 6 * 60 * 60 * 1000;
+// ─── Giờ quét cố định hàng ngày (cấu hình được từ Admin) ─────────────
+// Mặc định 3:00 AM. Lưu trong bảng app_settings (key-value).
+const DEFAULT_SCAN_HOUR = 3;
 
+function getScanHour() {
+  try {
+    const d = getDB();
+    if (!d) return DEFAULT_SCAN_HOUR;
+    d.exec(`CREATE TABLE IF NOT EXISTS app_settings (
+      khoa TEXT PRIMARY KEY,
+      gia_tri TEXT
+    )`);
+    const row = d.prepare("SELECT gia_tri FROM app_settings WHERE khoa = 'model_scan_hour'").get();
+    const h = parseInt(row?.gia_tri, 10);
+    return (h >= 0 && h <= 23) ? h : DEFAULT_SCAN_HOUR;
+  } catch(e) { return DEFAULT_SCAN_HOUR; }
+}
+
+function setScanHour(hour) {
+  const h = parseInt(hour, 10);
+  if (!(h >= 0 && h <= 23)) return false;
+  try {
+    const d = getDB();
+    if (!d) return false;
+    d.exec(`CREATE TABLE IF NOT EXISTS app_settings (
+      khoa TEXT PRIMARY KEY,
+      gia_tri TEXT
+    )`);
+    d.prepare(`INSERT INTO app_settings (khoa, gia_tri) VALUES ('model_scan_hour', ?)
+      ON CONFLICT(khoa) DO UPDATE SET gia_tri = excluded.gia_tri`).run(String(h));
+    return true;
+  } catch(e) { return false; }
+}
+
+// Tính số ms tới lần quét kế tiếp theo giờ cố định (mặc định 3:00 AM)
+function msUntilNextScanHour() {
+  const hour = getScanHour();
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(hour, 0, 0, 0);
+  if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1); // nếu đã qua giờ hôm nay → ngày mai
+  return next.getTime() - now.getTime();
+}
+
+// Quét vào giờ cố định mỗi ngày (mặc định 3:00 AM, đổi được từ Admin)
+let pendingScanTimer = null;
+let schedulerStarted = false;
+
+const scheduleNextScan = () => {
+  const waitMs = msUntilNextScanHour();
+  const hour = getScanHour();
+  console.log(`[ModelScanner] Scheduler: lần quét kế tiếp lúc ${String(hour).padStart(2, '0')}:00 (${Math.round(waitMs / 60000)} phút nữa)`);
+  pendingScanTimer = setTimeout(async () => {
+    try {
+      await scanAllProviders();
+    } catch(e) { console.error('[ModelScanner] Periodic scan failed:', e.message); }
+    scheduleNextScan();
+  }, waitMs);
+};
+
+// Đổi giờ quét từ Admin → lập lịch lại ngay (áp dụng tức thì, không phải chờ ngày mai)
+function rescheduleModelScan() {
+  if (!schedulerStarted) return; // scheduler chưa được bật → không tự khởi động vòng lặp
+  if (pendingScanTimer) { clearTimeout(pendingScanTimer); pendingScanTimer = null; }
+  scheduleNextScan();
+}
+
+// Khởi động cron: scan ngay khi bật (5s) + quét vào giờ cố định mỗi ngày
+function startModelScannerScheduler() {
   // Scan ngay khi server khởi động (delay 5s để server ổn định)
   setTimeout(() => {
     scanOnStartup().catch(e => console.error('[ModelScanner] Startup scan failed:', e.message));
   }, 5000);
 
-  // sau đó mỗi 6h
-  setInterval(() => {
-    scanAllProviders().catch(e => console.error('[ModelScanner] Periodic scan failed:', e.message));
-  }, SIX_HOURS);
+  schedulerStarted = true;
+  scheduleNextScan();
 
-  console.log(`[ModelScanner] Scheduler started: startup scan in 5s, then every 6h`);
+  console.log(`[ModelScanner] Scheduler started: startup scan in 5s, then daily at ${getScanHour()}:00`);
 }
 
-module.exports = { startModelScannerScheduler, scanAllProviders, scanOnStartup, scanProvider, PROVIDER_ENDPOINTS };
+module.exports = { startModelScannerScheduler, scanAllProviders, scanOnStartup, scanProvider, PROVIDER_ENDPOINTS, getScanHour, setScanHour, rescheduleModelScan };
