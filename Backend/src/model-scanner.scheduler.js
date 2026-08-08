@@ -77,6 +77,16 @@ try {
     // Filter only string IDs
     models = models.filter(m => typeof m === 'string' && m.length > 0);
 
+    // OpenRouter: CHỈ quét model :free (giá $0) — vì tài khoản có thể chưa nạp credits,
+    // model trả phí sẽ fail 'Insufficient credits' + quét 400 model sẽ đốt hết quota free 50/ngày
+    if (providerId === 'openrouter') {
+      const before = models.length;
+      models = models.filter(m => m.endsWith(':free') || m.includes(':free'));
+      if (models.length > 0 && models.length < before) {
+        console.log(`[ModelScanner] OpenRouter: lọc ${before} model → chỉ giữ ${models.length} model :free (trả phí bỏ qua)`);
+      }
+    }
+
     // FIX: If no models found, check for error messages in response
     if (models.length === 0) {
       const errMsg = data.error || data.message || data.detail || '';
