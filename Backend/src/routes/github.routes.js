@@ -26,44 +26,26 @@ const {
 const GITHUB_API = 'https://api.github.com';
 let GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GITHUB_KEY || '';
 
-// ─── SQLite storage cho repos đã lưu ───────────────────────
-const DB_PATH = path.join(__dirname, '..', '..', '..', 'Database', 'tro_ly_ai.db');
-let db;
-try {
-  db = new (require('better-sqlite3'))(DB_PATH);
-  db.exec(`CREATE TABLE IF NOT EXISTS saved_repos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    full_name TEXT UNIQUE NOT NULL,
-    owner TEXT,
-    name TEXT,
-    description TEXT,
-    language TEXT,
-    stars INTEGER DEFAULT 0,
-    forks INTEGER DEFAULT 0,
-    stars_gained INTEGER DEFAULT 0,
-    period TEXT DEFAULT '',
-    url TEXT,
-    saved_at TEXT DEFAULT (datetime('now', 'localtime'))
-  )`);
-  db.exec(`CREATE TABLE IF NOT EXISTS starred_repos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    full_name TEXT UNIQUE NOT NULL,
-    owner TEXT,
-    name TEXT,
-    starred_at TEXT DEFAULT (datetime('now', 'localtime'))
-  )`);
-} catch (e) { db = null; }
-function getDB() {
-  if (!db) { try { db = new (require('better-sqlite3'))(DB_PATH); } catch (e) { return null; } }
-  return db;
-}
+// FIX PROD: dùng chung adapter db.js (SQLite local / PostgreSQL trên Render) thay vì
+// better-sqlite3 file cứng — trước đây saved/starred repos nằm trong file DB riêng,
+// tách khỏi DB chính + bị xóa mỗi lần redeploy trên Render.
+const db = require('../config/db');
 
-// Load GitHub token from DB if not in env
-if (!GITHUB_TOKEN && db) {
-  try {
-    const row = db.prepare("SELECT gia_tri_khoa FROM khoa_api WHERE ten_nha_cung_cap = 'github'").get();
-    if (row && row.gia_tri_khoa) GITHUB_TOKEN = row.gia_tri_khoa;
-  } catch (e) { /* ignore */ }
+// Promise helpers cho adapter (callback-based)
+const runQ = (sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, function(err) { err ? reject(err) : resolve(this && this.changes != null ? this.changes : 0); }));
+const getQ = (sql, params = []) => new Promise((resolve, reject) => db.get(sql, params, (err, row) => err ? reject(err) : resolve(row)));
+const allQ = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows || [])));
+
+// Load GitHub token từ DB (adapter bất đồng bộ — load lazy qua promise)
+let tokenLoadPromise = null;
+function ensureGithubToken() {
+  if (GITHUB_TOKEN) return Promise.resolve(GITHUB_TOKEN);
+  if (!tokenLoadPromise) {
+    tokenLoadPromise = getQ("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'github'")
+      .then(row => { if (row && row.gia_tri_khoa) GITHUB_TOKEN = row.gia_tri_khoa.trim(); return GITHUB_TOKEN; })
+      .catch(() => GITHUB_TOKEN);
+  }
+  return tokenLoadPromise;
 }
 
 async function githubFetch(path, token) {
@@ -71,7 +53,7 @@ async function githubFetch(path, token) {
     'Accept': 'application/vnd.github.v3+json',
     'User-Agent': 'AI-REXI-Admin',
   };
-  const authToken = token || GITHUB_TOKEN;
+  const authToken = token || (await ensureGithubToken());
   if (authToken) headers['Authorization'] = `token ${authToken}`;
   
   const res = await fetch(`${GITHUB_API}${path}`, { headers });
@@ -276,17 +258,17 @@ router.get('/search', async (req, res) => {
 });
 
 // ─── Danh sách repos đã lưu ─────────────────────────────────
-router.get('/saved', (req, res) => {
-  const d = getDB();
-  if (!d) return res.json({ success: false, error: 'DB not available' });
-  const rows = d.prepare('SELECT * FROM saved_repos ORDER BY saved_at DESC').all();
-  res.json({ success: true, repos: rows });
+router.get('/saved', async (req, res) => {
+  try {
+    const rows = await allQ('SELECT * FROM saved_repos ORDER BY saved_at DESC');
+    res.json({ success: true, repos: rows });
+  } catch (e) {
+    res.json({ success: false, error: e.message });
+  }
 });
 
 // ─── Lưu 1 repo ─────────────────────────────────────────────
-router.post('/saved', (req, res) => {
-  const d = getDB();
-  if (!d) return res.json({ success: false, error: 'DB not available' });
+router.post('/saved', async (req, res) => {
   const {
     full_name, owner, name, description, language,
     stars = 0, forks = 0, stars_gained = 0, period = '', url
@@ -295,7 +277,7 @@ router.post('/saved', (req, res) => {
   if (!full_name) return res.status(400).json({ success: false, error: 'Missing full_name' });
 
   try {
-    const stmt = d.prepare(`
+    await runQ(`
       INSERT INTO saved_repos (full_name, owner, name, description, language, stars, forks, stars_gained, period, url)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(full_name) DO UPDATE SET
@@ -306,9 +288,8 @@ router.post('/saved', (req, res) => {
         stars_gained = excluded.stars_gained,
         period = excluded.period,
         url = excluded.url
-    `);
-    stmt.run(full_name, owner || full_name.split('/')[0], name || full_name.split('/')[1],
-      description || '', language || '', stars, forks, stars_gained, period, url || `https://github.com/${full_name}`);
+    `, [full_name, owner || full_name.split('/')[0], name || full_name.split('/')[1],
+      description || '', language || '', stars, forks, stars_gained, period, url || `https://github.com/${full_name}`]);
     res.json({ success: true, message: `Đã lưu ${full_name}` });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -316,13 +297,11 @@ router.post('/saved', (req, res) => {
 });
 
 // ─── Bỏ lưu 1 repo ──────────────────────────────────────────
-router.delete('/saved/:owner/:name', (req, res) => {
-  const d = getDB();
-  if (!d) return res.json({ success: false, error: 'DB not available' });
+router.delete('/saved/:owner/:name', async (req, res) => {
   const fullName = `${req.params.owner}/${req.params.name}`;
   try {
-    const info = d.prepare('DELETE FROM saved_repos WHERE full_name = ?').run(fullName);
-    res.json({ success: true, deleted: info.changes > 0 });
+    const changes = await runQ('DELETE FROM saved_repos WHERE full_name = ?', [fullName]);
+    res.json({ success: true, deleted: changes > 0 });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -362,7 +341,7 @@ router.get('/repo/:owner/:name', async (req, res) => {
       totalStars = Array.isArray(st) ? st.length : 0;
     } catch (e) { totalStars = data.stargazers_count; }
 
-    const aiSummary = getCachedSummary(data.full_name);
+    const aiSummary = await getCachedSummary(data.full_name);
 
     res.json({
       success: true,
@@ -401,14 +380,10 @@ router.get('/repo/:owner/:name', async (req, res) => {
 });
 
 // ─── Star growth history ───────────────────────────────────
-router.get('/stars/:owner/:name/history', (req, res) => {
-  const d = getDB();
-  if (!d) return res.json({ success: true, points: [] });
+router.get('/stars/:owner/:name/history', async (req, res) => {
   const fullName = `${req.params.owner}/${req.params.name}`;
   try {
-    const rows = d.prepare(
-      'SELECT stars, created_at FROM star_snapshots WHERE full_name = ? ORDER BY created_at ASC'
-    ).all(fullName);
+    const rows = await allQ('SELECT stars, created_at FROM star_snapshots WHERE full_name = ? ORDER BY created_at ASC', [fullName]);
     res.json({ success: true, points: rows });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -416,12 +391,10 @@ router.get('/stars/:owner/:name/history', (req, res) => {
 });
 
 // ─── Export saved repos ────────────────────────────────────
-router.get('/export/saved', (req, res) => {
-  const d = getDB();
-  if (!d) return res.status(500).json({ success: false, error: 'DB not available' });
+router.get('/export/saved', async (req, res) => {
   const { format = 'json' } = req.query;
   try {
-    const rows = d.prepare('SELECT * FROM saved_repos ORDER BY saved_at DESC').all();
+    const rows = await allQ('SELECT * FROM saved_repos ORDER BY saved_at DESC');
     const filename = `github-saved-${new Date().toISOString().slice(0, 10)}`;
     if (format === 'csv') {
       const headers = ['full_name', 'owner', 'name', 'description', 'language', 'stars', 'forks', 'stars_gained', 'period', 'url', 'saved_at'];
@@ -476,9 +449,9 @@ router.get('/export/starred', async (req, res) => {
 });
 
 // ─── Digest config status + manual trigger ─────────────────
-router.get('/digest/status', (req, res) => {
-  const tg = getTelegramConfig();
-  const em = getEmailConfig();
+router.get('/digest/status', async (req, res) => {
+  const tg = await getTelegramConfig();
+  const em = await getEmailConfig();
   res.json({
     success: true,
     telegram: !!tg,
@@ -507,30 +480,30 @@ router.post('/stars/snapshot', async (req, res) => {
 });
 
 // ─── Trending Notifications ─────────────────────────────────
-router.get('/notifications', (req, res) => {
+router.get('/notifications', async (req, res) => {
   try {
     const { limit = 20, unread_only = '0' } = req.query;
-    const notifications = getNotifications(Number(limit), unread_only === '1');
-    const unread_count = getUnreadCount();
+    const notifications = await getNotifications(Number(limit), unread_only === '1');
+    const unread_count = await getUnreadCount();
     res.json({ success: true, notifications, unread_count });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-router.get('/notifications/unread-count', (req, res) => {
+router.get('/notifications/unread-count', async (req, res) => {
   try {
-    const count = getUnreadCount();
+    const count = await getUnreadCount();
     res.json({ success: true, count });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-router.post('/notifications/read', (req, res) => {
+router.post('/notifications/read', async (req, res) => {
   try {
     const { ids } = req.body || {};
-    markAsRead(ids || null);
+    await markAsRead(ids || null);
     res.json({ success: true, message: 'Marked as read' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -540,29 +513,87 @@ router.post('/notifications/read', (req, res) => {
 
 // --- GitHub Star/Unstar (requires GitHub PAT with repo scope) ---
 
-// Check if a repo is starred — hybrid: local SQLite + GitHub API
+// Check if a repo is starred — ALWAYS verify with GitHub API, then sync local DB
 router.get('/starred/:owner/:name', async (req, res) => {
   try {
     const { owner, name } = req.params;
     const fullName = `${owner}/${name}`;
-    // Check local DB first
-    const d = getDB();
-    if (d) {
-      const row = d.prepare("SELECT id FROM starred_repos WHERE full_name = ?").get(fullName);
-      if (row) return res.json({ success: true, starred: true });
-    }
-    // Fallback: check GitHub API
+    await ensureGithubToken();
+
+    // Always check GitHub API first (source of truth)
     if (GITHUB_TOKEN) {
       try {
         const response = await fetch(`https://api.github.com/user/starred/${owner}/${name}`, {
           headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'AI-REXI-Admin' },
         });
-        if (response.status === 204) return res.json({ success: true, starred: true });
+        const isStarredOnGithub = response.status === 204;
+
+        // Sync DB với GitHub (nguồn sự thật)
+        if (isStarredOnGithub) {
+          await runQ("INSERT INTO starred_repos (full_name, owner, name) VALUES (?, ?, ?) ON CONFLICT(full_name) DO NOTHING", [fullName, owner, name]);
+        } else {
+          await runQ("DELETE FROM starred_repos WHERE full_name = ?", [fullName]);
+        }
+
+        return res.json({ success: true, starred: isStarredOnGithub });
       } catch {}
     }
-    res.json({ success: true, starred: false });
+
+    // Fallback: DB only (no GitHub token)
+    const row = await getQ("SELECT id FROM starred_repos WHERE full_name = ?", [fullName]).catch(() => null);
+    res.json({ success: true, starred: !!row });
   } catch (error) {
     res.json({ success: true, starred: false });
+  }
+});
+
+// Batch check starred repos — 1 API call instead of N
+router.post('/starred/batch', async (req, res) => {
+  try {
+    const { repos } = req.body || {}; // [{owner, name}, ...]
+    if (!Array.isArray(repos) || repos.length === 0) {
+      return res.json({ success: true, starred: {} });
+    }
+
+    await ensureGithubToken();
+    const result = {};
+
+    // Fetch all user's starred repos from GitHub (max 100)
+    if (GITHUB_TOKEN) {
+      try {
+        const response = await fetch('https://api.github.com/user/starred?per_page=100&sort=created&direction=desc', {
+          headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'AI-REXI-Admin' },
+        });
+        if (response.ok) {
+          const starred = await response.json();
+          const starredSet = new Set(starred.map(r => r.full_name.toLowerCase()));
+
+          for (const repo of repos) {
+            const fullName = `${repo.owner}/${repo.name}`;
+            const isStarred = starredSet.has(fullName.toLowerCase());
+            result[fullName] = isStarred;
+
+            // Sync DB với GitHub
+            if (isStarred) {
+              await runQ("INSERT INTO starred_repos (full_name, owner, name) VALUES (?, ?, ?) ON CONFLICT(full_name) DO NOTHING", [fullName, repo.owner, repo.name]);
+            } else {
+              await runQ("DELETE FROM starred_repos WHERE full_name = ?", [fullName]);
+            }
+          }
+          return res.json({ success: true, starred: result });
+        }
+      } catch {}
+    }
+
+    // Fallback: DB only
+    for (const repo of repos) {
+      const fullName = `${repo.owner}/${repo.name}`;
+      const row = await getQ("SELECT id FROM starred_repos WHERE full_name = ?", [fullName]).catch(() => null);
+      result[fullName] = !!row;
+    }
+    res.json({ success: true, starred: result });
+  } catch (error) {
+    res.json({ success: true, starred: {} });
   }
 });
 
@@ -573,11 +604,9 @@ router.post('/star', async (req, res) => {
     if (!owner || !name) return res.status(400).json({ success: false, error: 'Missing owner or name' });
     const fullName = `${owner}/${name}`;
     // Save locally
-    const d = getDB();
-    if (d) {
-      d.prepare("INSERT OR IGNORE INTO starred_repos (full_name, owner, name) VALUES (?, ?, ?)").run(fullName, owner, name);
-    }
+    await runQ("INSERT INTO starred_repos (full_name, owner, name) VALUES (?, ?, ?) ON CONFLICT(full_name) DO NOTHING", [fullName, owner, name]);
     // Also try GitHub API (best effort)
+    await ensureGithubToken();
     if (GITHUB_TOKEN) {
       try {
         const r = await fetch(`https://api.github.com/user/starred/${owner}/${name}`, {
@@ -598,11 +627,9 @@ router.delete('/star/:owner/:name', async (req, res) => {
     const { owner, name } = req.params;
     const fullName = `${owner}/${name}`;
     // Remove locally
-    const d = getDB();
-    if (d) {
-      d.prepare("DELETE FROM starred_repos WHERE full_name = ?").run(fullName);
-    }
+    await runQ("DELETE FROM starred_repos WHERE full_name = ?", [fullName]);
     // Also try GitHub API (best effort)
+    await ensureGithubToken();
     if (GITHUB_TOKEN) {
       try {
         await fetch(`https://api.github.com/user/starred/${owner}/${name}`, {
@@ -619,6 +646,7 @@ router.delete('/star/:owner/:name', async (req, res) => {
 // Get all starred repos for the authenticated user
 router.get('/starred', async (req, res) => {
   try {
+    await ensureGithubToken();
     if (!GITHUB_TOKEN) {
       return res.json({ success: true, repos: [], error: 'No GitHub token configured' });
     }

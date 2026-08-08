@@ -5,6 +5,13 @@ const { authMiddleware, adminMiddleware } = require('../middleware/auth.middlewa
 const fs = require('fs');
 const { execSync } = require('child_process');
 
+// Biểu thức thời gian theo loại DB (SQLite local / PostgreSQL trên Render)
+const dbNow = () => (db.type === 'sqlite' ? "datetime('now')" : 'NOW()');
+
+// Helper chạy query trả promise từ adapter callback-based
+const runQ = (sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, (err) => err ? reject(err) : resolve()));
+const allQ = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows || [])));
+
 const OPENCODE_BIN_PATH = process.env.OPENCODE_BIN_PATH || (process.env.USERPROFILE ? require("path").join(process.env.USERPROFILE, ".opencode", "bin", "opencode.exe") : "");
 const IS_OPENCODE_AVAILABLE = fs.existsSync(OPENCODE_BIN_PATH);
 
@@ -40,7 +47,7 @@ router.get('/', (req, res) => {
   }
   // Sắp xếp: provider theo thứ tự key trong khoa_api (giống trang Admin), model theo tên A→Z
   sql += ` ORDER BY
-    COALESCE((SELECT MIN(k.rowid) FROM khoa_api k WHERE LOWER(k.ten_nha_cung_cap) = LOWER(m.ma_nha_cung_cap)), 999999) ASC,
+    COALESCE((SELECT MIN(k.ngay_tao) FROM khoa_api k WHERE LOWER(k.ten_nha_cung_cap) = LOWER(m.ma_nha_cung_cap)), '9999-12-31') ASC,
     m.ten_hien_thi ASC`;
 
   db.all(sql, params, (err, rows) => {
@@ -52,7 +59,7 @@ router.get('/', (req, res) => {
         EXISTS (SELECT 1 FROM khoa_api k WHERE LOWER(k.ten_nha_cung_cap) = LOWER(c.ma_nha_cung_cap))
         OR EXISTS (SELECT 1 FROM ai_providers p2 WHERE LOWER(p2.ma_nha_cung_cap) = LOWER(c.ma_nha_cung_cap) AND p2.can_api_key = 0 AND p2.kich_hoat = 1)
       )`;
-      const orderBy = `ORDER BY COALESCE((SELECT MIN(k.rowid) FROM khoa_api k WHERE LOWER(k.ten_nha_cung_cap) = LOWER(c.ma_nha_cung_cap)), 999999) ASC, c.ma_model ASC`;
+      const orderBy = `ORDER BY COALESCE((SELECT MIN(k.ngay_tao) FROM khoa_api k WHERE LOWER(k.ten_nha_cung_cap) = LOWER(c.ma_nha_cung_cap)), '9999-12-31') ASC, c.ma_model ASC`;
       const cacheSql = provider
         ? `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache c WHERE trang_thai = 'working' AND LOWER(c.ma_nha_cung_cap) = LOWER(?) AND ${keyOrKeyless} ${orderBy}`
         : `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache c WHERE trang_thai = 'working' AND ${keyOrKeyless} ${orderBy}`;
@@ -629,9 +636,9 @@ router.post('/admin/models/verify-and-scan', [authMiddleware, adminMiddleware], 
 
         db.run(
           `INSERT INTO model_scan_cache (ma_model, ma_nha_cung_cap, trang_thai, do_tre_ms, loi_chi_tiet, thoi_gian_quet)
-           VALUES (?, ?, 'working', ?, NULL, datetime('now'))
+           VALUES (?, ?, 'working', ?, NULL, ${dbNow()})
            ON CONFLICT(ma_model, ma_nha_cung_cap) DO UPDATE SET
-             trang_thai = 'working', do_tre_ms = excluded.do_tre_ms, loi_chi_tiet = NULL, thoi_gian_quet = datetime('now')`,
+             trang_thai = 'working', do_tre_ms = excluded.do_tre_ms, loi_chi_tiet = NULL, thoi_gian_quet = ${dbNow()}`,
           [modelId, resolvedProvider, m.latency_ms || 0]
         );
       }
@@ -740,15 +747,12 @@ router.post('/admin/models/scan-all', [authMiddleware, adminMiddleware], async (
 
 // ─── Admin: Xóa sạch toàn bộ model chèn cứng và cache để thiết lập lại ──────
 // POST /api/admin/models/clear-and-reset
-router.post('/admin/models/clear-and-reset', [authMiddleware, adminMiddleware], (req, res) => {
+router.post('/admin/models/clear-and-reset', [authMiddleware, adminMiddleware], async (req, res) => {
   try {
-    // Dùng better-sqlite3 (sync) thay vì sqlite3 adapter (async) để đảm bảo xóa xong mới trả response
-    const Database = require('better-sqlite3');
-    const path = require('path');
-    const d = new Database(path.join(__dirname, '..', '..', '..', 'Database', 'tro_ly_ai.db'));
-    d.exec("DELETE FROM model_scan_cache; DELETE FROM provider_scan_log;");
-    d.exec("DELETE FROM ai_models;");
-    d.close();
+    // Xóa tuần tự qua adapter db.js (cùng DB với scanner + /api/models)
+    await runQ('DELETE FROM model_scan_cache');
+    await runQ('DELETE FROM provider_scan_log');
+    await runQ('DELETE FROM ai_models');
     if (typeof global !== 'undefined' && global.__modelScanComplete) {
       global.__modelScanComplete({ action: 'reset' });
     }
@@ -778,50 +782,15 @@ router.post('/admin/models/scan-provider', [authMiddleware, adminMiddleware], as
 
 // ─── Admin: Lấy kết quả scan cache từ CSDL ────────────────────
 // GET /api/admin/models/scan-cache?provider=gemini
-router.get('/admin/models/scan-cache', [authMiddleware, adminMiddleware], (req, res) => {
+router.get('/admin/models/scan-cache', [authMiddleware, adminMiddleware], async (req, res) => {
   const { provider } = req.query;
-  const Database = require('better-sqlite3');
-  const path = require('path');
-  const dbPath = path.join(__dirname, '..', '..', '..', 'Database', 'tro_ly_ai.db');
-  
   try {
-    const d = new Database(dbPath);
-    
-    // Tạo bảng nếu chưa có
-    d.exec(`
-      CREATE TABLE IF NOT EXISTS model_scan_cache (
-        ma_model TEXT NOT NULL,
-        ma_nha_cung_cap TEXT NOT NULL,
-        trang_thai TEXT NOT NULL,
-        do_tre_ms INTEGER DEFAULT 0,
-        loi_chi_tiet TEXT,
-        thoi_gian_quet TEXT DEFAULT (datetime('now')),
-        PRIMARY KEY (ma_model, ma_nha_cung_cap)
-      );
-      CREATE TABLE IF NOT EXISTS provider_scan_log (
-        ma_nha_cung_cap TEXT PRIMARY KEY,
-        lan_quet_cuoi TEXT DEFAULT (datetime('now')),
-        tong_model INTEGER DEFAULT 0,
-        model_hoat_dong INTEGER DEFAULT 0
-      );
-    `);
-
-    let models;
-    let providers;
-    
-    if (provider) {
-      models = d.prepare(`
-        SELECT ma_model, ma_nha_cung_cap, trang_thai, do_tre_ms, loi_chi_tiet, thoi_gian_quet
-        FROM model_scan_cache WHERE ma_nha_cung_cap = ? ORDER BY trang_thai DESC, do_tre_ms ASC
-      `).all(provider);
-    } else {
-      models = d.prepare(`
-        SELECT ma_model, ma_nha_cung_cap, trang_thai, do_tre_ms, loi_chi_tiet, thoi_gian_quet
-        FROM model_scan_cache ORDER BY ma_nha_cung_cap, trang_thai DESC, do_tre_ms ASC
-      `).all();
-    }
-
-    providers = d.prepare(`SELECT * FROM provider_scan_log`).all();
+    const models = provider
+      ? await allQ(`SELECT ma_model, ma_nha_cung_cap, trang_thai, do_tre_ms, loi_chi_tiet, thoi_gian_quet
+          FROM model_scan_cache WHERE ma_nha_cung_cap = ? ORDER BY trang_thai DESC, do_tre_ms ASC`, [provider])
+      : await allQ(`SELECT ma_model, ma_nha_cung_cap, trang_thai, do_tre_ms, loi_chi_tiet, thoi_gian_quet
+          FROM model_scan_cache ORDER BY ma_nha_cung_cap, trang_thai DESC, do_tre_ms ASC`);
+    const providers = await allQ('SELECT * FROM provider_scan_log');
 
     // Group by provider
     const grouped = {};
@@ -839,40 +808,47 @@ router.get('/admin/models/scan-cache', [authMiddleware, adminMiddleware], (req, 
   }
 });
 
-// ─── Admin: Thời gian tự động quét model (mặc định 03:00, đổi được) ──
-// GET /api/models/admin/models/scan-schedule
-router.get('/admin/models/scan-schedule', [authMiddleware, adminMiddleware], (req, res) => {
+// ─── Admin: Lịch quét tuần (mặc định CN→T2 00:00, chỉnh được) ──
+const DAY_NAMES = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+router.get('/admin/models/weekly-schedule', [authMiddleware, adminMiddleware], async (req, res) => {
   try {
-    const { getScanTime } = require('../model-scanner.scheduler');
-    const t = getScanTime();
-    const time = `${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`;
-    res.json({ success: true, hour: t.hour, minute: t.minute, time });
+    const { getWeeklySchedule } = require('../model-scanner.scheduler');
+    const s = await getWeeklySchedule();
+    res.json({ success: true, day: s.day, time: s.time, label: `${DAY_NAMES[s.day]} ${s.time}` });
   } catch(e) {
-    res.json({ success: true, hour: 3, minute: 0, time: '03:00' });
+    res.json({ success: true, day: 1, time: '00:00', label: 'CN → T2 00:00' });
   }
 });
 
-// POST /api/models/admin/models/scan-schedule  body: { time: 'HH:MM' } hoặc { hour, minute }
-router.post('/admin/models/scan-schedule', [authMiddleware, adminMiddleware], (req, res) => {
-  let hour, minute;
-  const { time, hour: bodyHour, minute: bodyMinute } = req.body || {};
-  if (typeof time === 'string' && /^\d{1,2}:\d{1,2}$/.test(time)) {
-    const parts = time.split(':');
-    hour = parseInt(parts[0], 10);
-    minute = parseInt(parts[1], 10);
-  } else {
-    hour = parseInt(bodyHour, 10);
-    minute = parseInt(bodyMinute ?? 0, 10);
+router.post('/admin/models/weekly-schedule', [authMiddleware, adminMiddleware], async (req, res) => {
+  try {
+    const { day, time } = req.body || {};
+    if (typeof day !== 'number' || day < 0 || day > 6) {
+      return res.status(400).json({ success: false, message: 'Ngày không hợp lệ (0=CN,1=T2,...,6=T7)' });
+    }
+    if (typeof time !== 'string' || !/^\d{1,2}:\d{2}$/.test(time)) {
+      return res.status(400).json({ success: false, message: 'Giờ không hợp lệ (VD: 00:00, 03:30)' });
+    }
+    const { setWeeklySchedule, scheduleWeeklyReset } = require('../model-scanner.scheduler');
+    const ok = await setWeeklySchedule(day, time);
+    if (!ok) return res.status(500).json({ success: false, message: 'Không lưu được lịch quét' });
+    try { await scheduleWeeklyReset(); } catch(e) { /* scheduler chưa bật */ }
+    res.json({ success: true, day, time, label: `${DAY_NAMES[day]} ${time}`, message: `Đã lưu: quét tự động ${DAY_NAMES[day]} ${time}` });
+  } catch(e) {
+    res.status(500).json({ success: false, message: e.message });
   }
-  if (!(hour >= 0 && hour <= 23) || !(minute >= 0 && minute <= 59)) {
-    return res.status(400).json({ success: false, message: 'Thời gian quét phải từ 00:00 đến 23:59' });
+});
+
+router.post('/admin/models/weekly-schedule/reset', [authMiddleware, adminMiddleware], async (req, res) => {
+  try {
+    const { resetWeeklySchedule, scheduleWeeklyReset } = require('../model-scanner.scheduler');
+    await resetWeeklySchedule();
+    try { await scheduleWeeklyReset(); } catch(e) { /* scheduler chưa bật */ }
+    res.json({ success: true, day: 1, time: '00:00', label: 'CN → T2 00:00', message: 'Đã reset về mặc định: CN → T2 00:00' });
+  } catch(e) {
+    res.status(500).json({ success: false, message: e.message });
   }
-  const { setScanTime, rescheduleModelScan } = require('../model-scanner.scheduler');
-  const ok = setScanTime(hour, minute);
-  if (!ok) return res.status(500).json({ success: false, message: 'Không lưu được thời gian quét' });
-  try { rescheduleModelScan(); } catch(e) { /* scheduler chưa bật thì lần restart sau sẽ dùng thời gian mới */ }
-  const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-  res.json({ success: true, hour, minute, time: timeStr, message: `Đã lưu: tự động quét lúc ${timeStr} hàng ngày` });
 });
 
 module.exports = router;

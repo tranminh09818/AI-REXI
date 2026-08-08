@@ -2,13 +2,31 @@
  * model-scanner.scheduler.js
  * Cron Job tự động quét tất cả providers mỗi 24h (lúc 3:00 AM)
  * và publish các model đang hoạt động lên CSDL
+ *
+ * FIX PROD: dùng adapter db.js (SQLite local / PostgreSQL trên Render) thay vì
+ * better-sqlite3 file cứng — trước đây chỉ chạy đúng trên máy local.
  */
-const path = require('path');
-const db_path = path.join(__dirname, '..', '..', 'Database', 'tro_ly_ai.db');
-let _db;
-function getDB() {
-  if (!_db) { try { _db = new (require('better-sqlite3'))(db_path); } catch(e) { return null; } }
-  return _db;
+const db = require('./config/db');
+
+// Biểu thức thời gian theo loại DB
+const isSqlite = db.type === 'sqlite';
+const NOW = () => (isSqlite ? "datetime('now')" : 'NOW()');
+
+// ─── Promise helpers cho adapter (callback-based) ─────────────
+function runSql(sql, params = []) {
+  return new Promise((resolve, reject) => db.run(sql, params, function(err) { err ? reject(err) : resolve(this && this.changes != null ? this.changes : 0); }));
+}
+function getRow(sql, params = []) {
+  return new Promise((resolve, reject) => db.get(sql, params, (err, row) => err ? reject(err) : resolve(row)));
+}
+function allRows(sql, params = []) {
+  return new Promise((resolve, reject) => db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows || [])));
+}
+// Chuyển giá trị thời gian từ DB (SQLite text / PG Date) về ms
+function toTimeMs(t) {
+  if (!t) return NaN;
+  if (t instanceof Date) return t.getTime();
+  return new Date(String(t).replace(' ', 'T') + 'Z').getTime();
 }
 
 // Danh sách tất cả providers và endpoint của chúng
@@ -29,11 +47,11 @@ const PROVIDER_ENDPOINTS = {
 };
 
 // Lấy API key từ CSDL cho một provider
-function getKeyForProvider(providerId) {
-  const d = getDB();
-  if (!d) return null;
-  const row = d.prepare("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = LOWER(?)").get(providerId);
-  return row?.gia_tri_khoa?.trim() || null;
+async function getKeyForProvider(providerId) {
+  try {
+    const row = await getRow("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = LOWER(?)", [providerId]);
+    return row?.gia_tri_khoa?.trim() || null;
+  } catch (e) { return null; }
 }
 
 // Fetch danh sách model từ endpoint
@@ -61,7 +79,7 @@ try {
 
     const headers = { 'Accept': 'application/json' };
     if (authType === 'bearer' && apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    
+
     let url = endpoint;
     if (authType === 'key' && apiKey) url = `${endpoint}?key=${apiKey}`;
 
@@ -73,7 +91,7 @@ try {
     if (Array.isArray(data)) models = data.map(m => m.id || m.name || m);
     else if (Array.isArray(data.data)) models = data.data.map(m => m.id || m.name || m);
     else if (Array.isArray(data.models)) models = data.models.map(m => m.id || m.name || m);
-    
+
     // Filter only string IDs
     models = models.filter(m => typeof m === 'string' && m.length > 0);
 
@@ -188,61 +206,34 @@ async function quickHealthCheck(providerId, apiKey, modelId) {
   }
 }
 
-// Lưu kết quả quét vào CSDL
-function saveScanResult(providerId, modelId, status, latencyMs, errorMsg) {
-  const d = getDB();
-  if (!d) return;
-
-
-
+// Lưu kết quả quét vào CSDL (bảng đã được tạo bởi init-db khi khởi động)
+async function saveScanResult(providerId, modelId, status, latencyMs, errorMsg) {
   try {
-    // Tạo bảng nếu chưa có
-    d.exec(`
-      CREATE TABLE IF NOT EXISTS model_scan_cache (
-        ma_model TEXT NOT NULL,
-        ma_nha_cung_cap TEXT NOT NULL,
-        trang_thai TEXT NOT NULL,
-        do_tre_ms INTEGER DEFAULT 0,
-        loi_chi_tiet TEXT,
-        thoi_gian_quet TEXT DEFAULT (datetime('now')),
-        PRIMARY KEY (ma_model, ma_nha_cung_cap)
-      )
-    `);
-    
-    d.prepare(`
+    await runSql(`
       INSERT INTO model_scan_cache (ma_model, ma_nha_cung_cap, trang_thai, do_tre_ms, loi_chi_tiet, thoi_gian_quet)
-      VALUES (?, ?, ?, ?, ?, datetime('now'))
+      VALUES (?, ?, ?, ?, ?, ${NOW()})
       ON CONFLICT(ma_model, ma_nha_cung_cap) DO UPDATE SET
         trang_thai = excluded.trang_thai,
         do_tre_ms = excluded.do_tre_ms,
         loi_chi_tiet = excluded.loi_chi_tiet,
-        thoi_gian_quet = datetime('now')
-    `).run(modelId, providerId, status, latencyMs || 0, errorMsg || null);
-    
+        thoi_gian_quet = ${NOW()}
+    `, [modelId, providerId, status, latencyMs || 0, errorMsg || null]);
   } catch(e) {
     console.error('[ModelScanner] Save error:', e.message);
   }
 }
 
 // Lưu log thời gian quét gần nhất của provider
-function saveProviderScanTime(providerId, total = 0, working = 0) {
-  const d = getDB();
-  if (!d) return;
+async function saveProviderScanTime(providerId, total = 0, working = 0) {
   try {
-    d.exec(`CREATE TABLE IF NOT EXISTS provider_scan_log (
-      ma_nha_cung_cap TEXT PRIMARY KEY,
-      lan_quet_cuoi TEXT DEFAULT (datetime('now')),
-      tong_model INTEGER DEFAULT 0,
-      model_hoat_dong INTEGER DEFAULT 0
-    )`);
-    d.prepare(`
+    await runSql(`
       INSERT INTO provider_scan_log (ma_nha_cung_cap, lan_quet_cuoi, tong_model, model_hoat_dong)
-      VALUES (?, datetime('now'), ?, ?)
+      VALUES (?, ${NOW()}, ?, ?)
       ON CONFLICT(ma_nha_cung_cap) DO UPDATE SET
-        lan_quet_cuoi = datetime('now'),
+        lan_quet_cuoi = ${NOW()},
         tong_model = excluded.tong_model,
         model_hoat_dong = excluded.model_hoat_dong
-    `).run(providerId, total, working);
+    `, [providerId, total, working]);
   } catch(e) {}
 }
 
@@ -269,7 +260,7 @@ async function scanProvider(providerId) {
   const cfg = PROVIDER_ENDPOINTS[providerId];
   if (!cfg) return { success: false, error: 'Unknown provider' };
 
-  let apiKey = getKeyForProvider(providerId);
+  let apiKey = await getKeyForProvider(providerId);
   if (!apiKey && !['opencode'].includes(providerId)) {
     return { success: false, error: 'No API key configured', skipped: true };
   }
@@ -278,9 +269,9 @@ async function scanProvider(providerId) {
   console.log(`[ModelScanner] Scanning ${cfg.name}...`);
 
   // ⏱️ Ghi thời điểm thử quét NGAY từ đầu (kể cả fetch fail) để cooldown startup áp dụng cho mọi provider
-  saveProviderScanTime(providerId, 0, 0);
+  await saveProviderScanTime(providerId, 0, 0);
 
-  const { success, models, error } = await fetchModels(providerId, apiKey, cfg.endpoint, cfg.auth);
+  let { success, models, error } = await fetchModels(providerId, apiKey, cfg.endpoint, cfg.auth);
   if (!success) {
     console.error(`[ModelScanner] ${cfg.name} fetch failed: ${error}`);
     return { success: false, error };
@@ -291,43 +282,84 @@ async function scanProvider(providerId) {
     return { success: false, error: 'No models returned from API', provider: providerId };
   }
 
+  console.log(`[ModelScanner] ${cfg.name}: ${models.length} models found. Optimizing scan...`);
 
-  console.log(`[ModelScanner] ${cfg.name}: ${models.length} models found. Testing health...`);
+  // ─── TỐI UU HÓA 1: Filter model không phải chat ──────────────
+  const SKIP_PATTERNS = [/embed/i, /image/i, /dall-e/i, /tts/i, /rerank/i, /moderation/i, /whisper/i, /speech/i, /audio/i, /stable-diffusion/i, /midjourney/i, /vision/i, /embed/i, /inpainting/i, /upscale/i];
+  const beforeFilter = models.length;
+  models = models.filter(m => !SKIP_PATTERNS.some(p => p.test(m)));
+  if (models.length < beforeFilter) {
+    console.log(`[ModelScanner] ${cfg.name}: filtered ${beforeFilter - models.length} non-chat models → ${models.length} remaining`);
+  }
 
-  // Ưu tiên tuyệt đối đưa kira-mini-1.0 và các model free lên ĐẦU danh sách quét
-  const priorityModels = ['kira-mini-1.0', 'gemini-1.5-flash', 'llama-3.3-70b', 'gpt-4o-mini'];
+  // ─── TỐI UU HÓA 2: Skip model đã test gần đây ───────────────
+  const results = [];   // khai báo sớm để cả 2 luồng (skip + health test) cùng dùng
+  let skipCount = 0;
+  try {
+    const recent = await allRows(`
+      SELECT ma_model, trang_thai, thoi_gian_quet
+      FROM model_scan_cache WHERE ma_nha_cung_cap = ?
+    `, [providerId]);
+
+    const now = Date.now();
+    const WORKING_TTL = 24 * 60 * 60 * 1000;  // 24h — working model giữ nguyên
+    const FAILED_TTL = 6 * 60 * 60 * 1000;    // 6h — failed model bỏ qua, không retry sớm
+    const recentMap = new Map();
+    for (const row of recent) {
+      recentMap.set(row.ma_model, { status: row.trang_thai, time: toTimeMs(row.thoi_gian_quet) });
+    }
+
+    const modelsToKeep = [];
+    const skippedModels = [];  // track models skipped vì vừa test xong
+    for (const m of models) {
+      const prev = recentMap.get(m);
+      if (!prev) { modelsToKeep.push(m); continue; }           // chưa test → cần test
+      const age = now - prev.time;
+      if (prev.status === 'working' && age < WORKING_TTL) { skippedModels.push(m); continue; } // working 24h → skip
+      if (prev.status === 'failed' && age < FAILED_TTL) { skipCount++; continue; }    // failed 6h → skip
+      modelsToKeep.push(m);  // hết TTL → test lại
+    }
+    models = modelsToKeep;
+
+    // Lưu skipped models (vừa test < 24h, đang working) để giữ lại trong DB
+    if (skippedModels.length > 0) {
+      for (const m of skippedModels) {
+        results.push({ id: m, status: 'working', latency_ms: 0, skipped: true });
+      }
+      console.log(`[ModelScanner] ${cfg.name}: preserved ${skippedModels.length} recently-working models`);
+    }
+  } catch { /* ignore — scan bình thường nếu DB fail */ }
+  if (skipCount > 0) {
+    console.log(`[ModelScanner] ${cfg.name}: skipped ${skipCount} recently tested → ${models.length} to scan`);
+  }
+
+  // Ưu tiên: model free/mini/flash lên đầu
   const priorityKeywords = ['mini', 'free', 'flash', '70b', 'small', 'lite'];
   models.sort((a, b) => {
-    const aLower = a.toLowerCase();
-    const bLower = b.toLowerCase();
-    if (aLower === 'kira-mini-1.0') return -1;
-    if (bLower === 'kira-mini-1.0') return 1;
-    const aPri = priorityKeywords.some(kw => aLower.includes(kw));
-    const bPri = priorityKeywords.some(kw => bLower.includes(kw));
+    const aPri = priorityKeywords.some(kw => a.toLowerCase().includes(kw));
+    const bPri = priorityKeywords.some(kw => b.toLowerCase().includes(kw));
     if (aPri && !bPri) return -1;
     if (!aPri && bPri) return 1;
     return 0;
   });
 
-  // Test health in parallel batches of 15 (quét TOÀN BỘ model provider đã trả về)
-  const modelsToTest = models;
-  const results = [];
-  const BATCH = 15;
-  const BATCH_DELAY_MS = 800; // giãn cách giữa các batch → tránh chạm rate-limit chung của provider (ảnh hưởng người dùng đang chat cùng lúc)
+  // ─── Test health: batch 8, early exit khi provider ổn định ────
+  const BATCH = 8;
+  const BATCH_DELAY_MS = 600;
   let consecutiveFailures = 0;
+  let consecutiveSuccesses = 0;
+  const EARLY_SUCCESS_THRESHOLD = 12; // 12 model liên tiếp working → provider ổn, bỏ qua phần còn lại
 
-  const filteredModels = modelsToTest;
-  for (let i = 0; i < filteredModels.length; i += BATCH) {
-    const batch = filteredModels.slice(i, i + BATCH);
+  for (let i = 0; i < models.length; i += BATCH) {
+    const batch = models.slice(i, i + BATCH);
     const batchResults = await Promise.all(batch.map(async modelId => {
       const health = await quickHealthCheck(providerId, apiKey, modelId);
-      saveScanResult(providerId, modelId, health.status, health.latency_ms, health.error);
+      await saveScanResult(providerId, modelId, health.status, health.latency_ms, health.error);
       return { id: modelId, ...health };
     }));
     results.push(...batchResults);
 
-    // Early bail-out: only if first batch ALL fail with AUTH errors (401/403 = invalid key)
-    // Balance errors (429/402) should NOT trigger bail-out — user just needs to top up
+    // Early bail-out: first batch ALL fail auth → key invalid
     const batchFailed = batchResults.filter(r => r.status === 'failed').length;
     const hasAuthError = batchResults.some(r => {
       const e = (r.error || '').toLowerCase();
@@ -336,13 +368,26 @@ async function scanProvider(providerId) {
     const allFailed = batchFailed === batch.length;
     consecutiveFailures = allFailed && hasAuthError ? consecutiveFailures + batch.length : (allFailed ? consecutiveFailures : 0);
     if (i === 0 && consecutiveFailures >= batch.length) {
-      console.log(`[ModelScanner] ${cfg.name}: first batch all failed with auth errors — key likely invalid, stopping early`);
+      console.log(`[ModelScanner] ${cfg.name}: first batch all auth errors — key invalid, stopping`);
       break;
     }
 
-    // ⏱️ Pacing: nghỉ ngắn giữa các batch để không bắn dồn dập request
-    // → giảm nguy cơ chạm rate-limit chung của provider (quota dùng chung với người dùng đang chat)
-    if (i + BATCH < filteredModels.length) {
+    // Early success: nếu 12+ model liên tiếp working → provider ổn, bỏ qua phần còn lại
+    const batchSuccesses = batchResults.filter(r => r.status === 'working').length;
+    consecutiveSuccesses = batchSuccesses > 0 ? consecutiveSuccesses + batchSuccesses : 0;
+    if (consecutiveSuccesses >= EARLY_SUCCESS_THRESHOLD && i + BATCH < models.length) {
+      console.log(`[ModelScanner] ${cfg.name}: ${consecutiveSuccesses} consecutive working — provider healthy, skipping remaining ${models.length - i - BATCH} models`);
+      // Mark skipped models as "skipped" (không gọi API)
+      const skipped = models.slice(i + BATCH);
+      for (const m of skipped) {
+        await saveScanResult(providerId, m, 'skipped', 0, 'provider_healthy');
+        results.push({ id: m, status: 'skipped', latency_ms: 0, reason: 'provider_healthy' });
+      }
+      break;
+    }
+
+    // Pacing
+    if (i + BATCH < models.length) {
       await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
     }
   }
@@ -352,36 +397,34 @@ async function scanProvider(providerId) {
 
   // Only save scan time if we actually tested models (lưu kèm tổng + số working vào provider_scan_log)
   if (results.length > 0) {
-    saveProviderScanTime(providerId, results.length, working);
+    await saveProviderScanTime(providerId, results.length, working);
   }
 
   console.log(`[ModelScanner] ${cfg.name}: ${working}/${results.length} working`);
 
   // 🔄 RESET THÔNG MINH (Smart Reset): mỗi lượt quét = 1 lần reset của chính provider đó.
-  // ≥1 model working → XÓA HẾT model cũ + insert đúng danh sách working mới (transaction delete+insert nguyên tử).
+  // ≥1 model working → XÓA HẾT model cũ + insert đúng danh sách working mới.
   // 0 working (mạng lỗi / rate-limit / key lỗi tạm thời) → GIỮ model cũ + báo rõ lý do, tránh mất trắng provider.
   let keptOld = false;
   let keptOldReason = '';
   if (working > 0) {
     try {
-      const d = getDB();
-      if (d) {
-        const replaceTx = d.transaction(() => {
-          d.prepare('DELETE FROM ai_models WHERE ma_nha_cung_cap = ?').run(providerId);
-          const ins = d.prepare(`
-            INSERT INTO ai_models (ma_model, ma_nha_cung_cap, ten_hien_thi, loai, thu_tu_hien_thi, kich_hoat)
-            VALUES (?, ?, ?, ?, 0, 1)
-          `);
-          for (const m of workingList) {
-            const modelId = m.id;
-            const displayName = modelId.includes('/') ? modelId.split('/').pop() : modelId;
-            const type = (modelId.includes('pro') || modelId.includes('gpt-4') || modelId.includes('opus') || modelId.includes('sonnet')) ? 'pro' : 'free';
-            ins.run(modelId, providerId, displayName, type);
-          }
-        });
-        replaceTx();
-        console.log(`[ModelScanner] ${cfg.name}: đã replace ${working} model working mới vào DB (xóa model cũ)`);
-      }
+      // 🔒 ATOMIC SWAP: xóa model cũ + insert model mới trong 1 transaction (BEGIN/COMMIT/ROLLBACK)
+      // — crash giữa chừng sẽ rollback toàn bộ, KHÔNG bao giờ để bảng rỗng nửa vời giữa 2 DB.
+      await db.withTransaction(async (tx) => {
+        await tx.run('DELETE FROM ai_models WHERE ma_nha_cung_cap = ?', [providerId]);
+        const ins = `
+          INSERT INTO ai_models (ma_model, ma_nha_cung_cap, ten_hien_thi, loai, thu_tu_hien_thi, kich_hoat)
+          VALUES (?, ?, ?, ?, 0, 1)
+        `;
+        for (const m of workingList) {
+          const modelId = m.id;
+          const displayName = modelId.includes('/') ? modelId.split('/').pop() : modelId;
+          const type = (modelId.includes('pro') || modelId.includes('gpt-4') || modelId.includes('opus') || modelId.includes('sonnet')) ? 'pro' : 'free';
+          await tx.run(ins, [modelId, providerId, displayName, type]);
+        }
+      });
+      console.log(`[ModelScanner] ${cfg.name}: đã replace ${working} model working mới vào DB (xóa model cũ, atomic)`);
     } catch (repErr) {
       console.error(`[ModelScanner] ${cfg.name} replace models error:`, repErr.message);
     }
@@ -420,14 +463,12 @@ async function scanAllProviders() {
 }
 
 // Dọn "model ma": model của provider không còn key thì không thể hoạt động → xóa sạch
-function cleanupStaleModels(providerId) {
+async function cleanupStaleModels(providerId) {
   try {
-    const d = getDB();
-    if (!d) return;
-    const del1 = d.prepare('DELETE FROM ai_models WHERE ma_nha_cung_cap = ?').run(providerId);
-    const del2 = d.prepare('DELETE FROM model_scan_cache WHERE ma_nha_cung_cap = ?').run(providerId);
-    if (del1.changes > 0 || del2.changes > 0) {
-      console.log(`[ModelScanner] Đã dọn ${del1.changes} model ma của provider '${providerId}' (không còn key)`);
+    const del1 = await runSql('DELETE FROM ai_models WHERE ma_nha_cung_cap = ?', [providerId]);
+    const del2 = await runSql('DELETE FROM model_scan_cache WHERE ma_nha_cung_cap = ?', [providerId]);
+    if (del1 || del2) {
+      console.log(`[ModelScanner] Đã dọn model ma của provider '${providerId}' (không còn key)`);
     }
   } catch(e) { /* ignore */ }
 }
@@ -437,13 +478,11 @@ function cleanupStaleModels(providerId) {
 const STARTUP_SCAN_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
 // Kiểm tra provider có được quét gần đây chưa (dựa trên provider_scan_log)
-function wasRecentlyScanned(providerId, cooldownMs) {
+async function wasRecentlyScanned(providerId, cooldownMs) {
   try {
-    const d = getDB();
-    if (!d) return false;
-    const row = d.prepare('SELECT lan_quet_cuoi FROM provider_scan_log WHERE ma_nha_cung_cap = ?').get(providerId);
+    const row = await getRow('SELECT lan_quet_cuoi FROM provider_scan_log WHERE ma_nha_cung_cap = ?', [providerId]);
     if (!row || !row.lan_quet_cuoi) return false;
-    const last = new Date(String(row.lan_quet_cuoi).replace(' ', 'T') + 'Z').getTime(); // datetime('now') lưu UTC
+    const last = toTimeMs(row.lan_quet_cuoi);
     if (isNaN(last)) return false;
     return (Date.now() - last) < cooldownMs;
   } catch (e) { return false; }
@@ -454,14 +493,14 @@ async function scanOnStartup() {
   console.log('[ModelScanner] Startup scan: checking providers with keys...');
   const summary = [];
   for (const providerId of Object.keys(PROVIDER_ENDPOINTS)) {
-    const apiKey = getKeyForProvider(providerId);
+    const apiKey = await getKeyForProvider(providerId);
     // Bỏ qua provider KHÔNG có key, TRỪ các provider không cần key (local CLI / free)
     if (!apiKey && !['opencode'].includes(providerId)) {
-      cleanupStaleModels(providerId); // provider không có key → dọn model ma cũ của họ
+      await cleanupStaleModels(providerId); // provider không có key → dọn model ma cũ của họ
       continue;
     }
     // ⏱️ Cooldown: provider vừa quét < 6h trước → bỏ qua (không đốt quota, không làm phiền người dùng)
-    if (wasRecentlyScanned(providerId, STARTUP_SCAN_COOLDOWN_MS)) {
+    if (await wasRecentlyScanned(providerId, STARTUP_SCAN_COOLDOWN_MS)) {
       console.log(`[ModelScanner] Startup: bỏ qua ${providerId} — đã quét gần đây (cooldown 6h)`);
       continue;
     }
@@ -484,113 +523,127 @@ async function scanOnStartup() {
   return summary;
 }
 
-// ─── Thời gian quét cố định hàng ngày (cấu hình được từ Admin) ────────
-// Mặc định 3:00 AM. Lưu HH:MM (vd '03:30') trong bảng app_settings (key-value).
-const DEFAULT_SCAN_TIME = '03:00';
-
-// Chuyển đổi giá trị lưu trong DB thành { hour, minute }.
-// Hỗ trợ cả dữ liệu cũ ('3' / 5 = giờ nguyên) lẫn mới ('03:30').
-function normalizeScanTime(raw) {
-  const s = String(raw ?? '').trim();
-  if (/^\d{1,2}$/.test(s)) {
-    const h = parseInt(s, 10);
-    return (h >= 0 && h <= 23) ? { hour: h, minute: 0 } : { hour: 3, minute: 0 };
-  }
-  const m = s.match(/^(\d{1,2}):(\d{1,2})$/);
-  if (m) {
-    const h = parseInt(m[1], 10);
-    const mi = parseInt(m[2], 10);
-    if (h >= 0 && h <= 23 && mi >= 0 && mi <= 59) return { hour: h, minute: mi };
-  }
-  return { hour: 3, minute: 0 };
-}
-
-function getScanTime() {
-  try {
-    const d = getDB();
-    if (!d) return normalizeScanTime(DEFAULT_SCAN_TIME);
-    d.exec(`CREATE TABLE IF NOT EXISTS app_settings (
-      khoa TEXT PRIMARY KEY,
-      gia_tri TEXT
-    )`);
-    const row = d.prepare("SELECT gia_tri FROM app_settings WHERE khoa = 'model_scan_time'").get();
-    if (row) return normalizeScanTime(row.gia_tri);
-    // Tương thích dữ liệu cũ: key 'model_scan_hour' (giờ nguyên)
-    const oldRow = d.prepare("SELECT gia_tri FROM app_settings WHERE khoa = 'model_scan_hour'").get();
-    if (oldRow) return normalizeScanTime(oldRow.gia_tri);
-    return normalizeScanTime(DEFAULT_SCAN_TIME);
-  } catch(e) { return normalizeScanTime(DEFAULT_SCAN_TIME); }
-}
-
-function setScanTime(hour, minute) {
-  const h = parseInt(hour, 10);
-  const m = parseInt(minute ?? 0, 10);
-  if (!(h >= 0 && h <= 23) || !(m >= 0 && m <= 59)) return false;
-  try {
-    const d = getDB();
-    if (!d) return false;
-    d.exec(`CREATE TABLE IF NOT EXISTS app_settings (
-      khoa TEXT PRIMARY KEY,
-      gia_tri TEXT
-    )`);
-    const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-    d.prepare(`INSERT INTO app_settings (khoa, gia_tri) VALUES ('model_scan_time', ?)
-      ON CONFLICT(khoa) DO UPDATE SET gia_tri = excluded.gia_tri`).run(timeStr);
-    // Dọn key cũ (nếu tồn tại từ bản trước)
-    try { d.prepare(`DELETE FROM app_settings WHERE khoa = 'model_scan_hour'`).run(); } catch(e) {}
-    return true;
-  } catch(e) { return false; }
-}
-
-// Tương thích ngược: giữ hàm cũ dùng cho log/API cũ
-function getScanHour() { return getScanTime().hour; }
-function setScanHour(hour) { return setScanTime(hour, 0); }
-
-// Tính số ms tới lần quét kế tiếp theo thời gian cố định (mặc định 3:00 AM)
-function msUntilNextScanTime() {
-  const { hour, minute } = getScanTime();
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(hour, minute, 0, 0);
-  if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1); // nếu đã qua giờ hôm nay → ngày mai
-  return next.getTime() - now.getTime();
-}
-
-// Quét vào giờ cố định mỗi ngày (mặc định 3:00 AM, đổi được từ Admin)
-let pendingScanTimer = null;
+// ─── Startup + Weekly Reset (chỉ quét khi server khởi động + mỗi CN→T2 00:00) ──
 let schedulerStarted = false;
 
-const scheduleNextScan = () => {
-  const waitMs = msUntilNextScanTime();
-  const { hour, minute } = getScanTime();
-  console.log(`[ModelScanner] Scheduler: lần quét kế tiếp lúc ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} (${Math.round(waitMs / 60000)} phút nữa)`);
-  pendingScanTimer = setTimeout(async () => {
-    try {
-      await scanAllProviders();
-    } catch(e) { console.error('[ModelScanner] Periodic scan failed:', e.message); }
-    scheduleNextScan();
-  }, waitMs);
-};
-
-// Đổi giờ quét từ Admin → lập lịch lại ngay (áp dụng tức thì, không phải chờ ngày mai)
-function rescheduleModelScan() {
-  if (!schedulerStarted) return; // scheduler chưa được bật → không tự khởi động vòng lặp
-  if (pendingScanTimer) { clearTimeout(pendingScanTimer); pendingScanTimer = null; }
-  scheduleNextScan();
-}
-
-// Khởi động cron: scan ngay khi bật (5s) + quét vào giờ cố định mỗi ngày
-function startModelScannerScheduler() {
+async function startModelScannerScheduler() {
   // Scan ngay khi server khởi động (delay 5s để server ổn định)
   setTimeout(() => {
     scanOnStartup().catch(e => console.error('[ModelScanner] Startup scan failed:', e.message));
   }, 5000);
 
   schedulerStarted = true;
-  scheduleNextScan();
-
-  const t = getScanTime();
-  console.log(`[ModelScanner] Scheduler started: startup scan in 5s, then daily at ${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`);
+  try {
+    await scheduleWeeklyReset();  // ← Weekly reset: CN → T2 00:00 VN
+    const schedule = await getWeeklySchedule();
+    const dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    console.log(`[ModelScanner] Scheduler started: startup scan in 5s, weekly reset ${dayNames[schedule.day]} ${schedule.time}`);
+  } catch (e) {
+    console.error('[ModelScanner] Scheduler init error:', e.message);
+  }
 }
 
-module.exports = { startModelScannerScheduler, scanAllProviders, scanOnStartup, scanProvider, PROVIDER_ENDPOINTS, getScanHour, setScanHour, getScanTime, setScanTime, rescheduleModelScan };
+// ─── WEEKLY SCHEDULE: get/set từ DB ─────────────────────────────
+// Mặc định: day=1 (Thứ 2), time='00:00'
+const DEFAULT_SCHEDULE = { day: 1, time: '00:00' }; // 0=CN,1=T2,...,6=T7
+
+async function getWeeklySchedule() {
+  try {
+    const row = await getRow("SELECT gia_tri FROM app_settings WHERE khoa = 'weekly_scan_schedule'");
+    if (row && row.gia_tri) {
+      const parsed = JSON.parse(row.gia_tri);
+      if (typeof parsed.day === 'number' && typeof parsed.time === 'string') return parsed;
+    }
+  } catch { /* ignore */ }
+  return { ...DEFAULT_SCHEDULE };
+}
+
+async function setWeeklySchedule(day, time) {
+  try {
+    const val = JSON.stringify({ day, time });
+    await runSql(`INSERT INTO app_settings (khoa, gia_tri) VALUES ('weekly_scan_schedule', ?)
+      ON CONFLICT(khoa) DO UPDATE SET gia_tri = excluded.gia_tri`, [val]);
+    return true;
+  } catch { return false; }
+}
+
+async function resetWeeklySchedule() {
+  await setWeeklySchedule(DEFAULT_SCHEDULE.day, DEFAULT_SCHEDULE.time);
+}
+
+// ─── WEEKLY RESET: clear cache + scan full mỗi tuần ─────────────
+let weeklyResetTimer = null;
+
+async function resetScanCache() {
+  try {
+    const row = await getRow('SELECT COUNT(*) as cnt FROM model_scan_cache');
+    const count = row?.cnt || 0;
+    await runSql('DELETE FROM model_scan_cache');
+    console.log(`[ModelScanner] Weekly reset: cleared ${count} cached scan results`);
+    return count;
+  } catch (e) {
+    console.error('[ModelScanner] Weekly reset failed:', e.message);
+    return 0;
+  }
+}
+
+async function msUntilNextWeeklyScan() {
+  const { day, time } = await getWeeklySchedule(); // day: 0=CN,1=T2,...,6=T7
+  const [hourStr, minStr] = time.split(':');
+  const targetHour = parseInt(hourStr, 10);
+  const targetMin = parseInt(minStr, 10);
+
+  const now = new Date();
+  // Target ở VN timezone (UTC+7) → convert sang UTC
+  const targetUtcHour = (targetHour - 7 + 24) % 24;
+
+  // Tính số ngày tới ngày target trong tuần
+  const utcDay = now.getUTCDay();
+  let daysUntilTarget;
+  if (utcDay === day && now.getUTCHours() < targetUtcHour) {
+    daysUntilTarget = 0;
+  } else if (utcDay === day && now.getUTCHours() === targetUtcHour && now.getUTCMinutes() < targetMin) {
+    daysUntilTarget = 0;
+  } else {
+    daysUntilTarget = ((day - utcDay) + 7) % 7;
+    if (daysUntilTarget === 0) daysUntilTarget = 7;
+  }
+
+  const target = new Date(Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilTarget,
+    targetUtcHour, targetMin, 0, 0
+  ));
+
+  if (target.getTime() <= now.getTime()) {
+    target.setUTCDate(target.getUTCDate() + 7);
+  }
+
+  return target.getTime() - now.getTime();
+}
+
+async function scheduleWeeklyReset() {
+  if (weeklyResetTimer) clearTimeout(weeklyResetTimer);
+  const waitMs = await msUntilNextWeeklyScan();
+  const days = Math.floor(waitMs / 86400000);
+  const hours = Math.floor((waitMs % 86400000) / 3600000);
+  const schedule = await getWeeklySchedule();
+  const dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+  console.log(`[ModelScanner] Weekly reset scheduled: ${dayNames[schedule.day]} ${schedule.time} (${days}d ${hours}h from now)`);
+
+  weeklyResetTimer = setTimeout(async () => {
+    try {
+      console.log('[ModelScanner] ═══ WEEKLY RESET START ═══');
+      await resetScanCache();
+      await scanAllProviders();
+      console.log('[ModelScanner] ═══ WEEKLY RESET COMPLETE ═══');
+    } catch (e) {
+      console.error('[ModelScanner] Weekly reset scan failed:', e.message);
+    }
+    // Quét xong → reset về mặc định (CN→T2 00:00)
+    await resetWeeklySchedule();
+    console.log('[ModelScanner] Schedule reset to default: CN → T2 00:00');
+    await scheduleWeeklyReset(); // Lên lịch tuần tiếp theo (mặc định)
+  }, waitMs);
+}
+
+module.exports = { startModelScannerScheduler, scanAllProviders, scanOnStartup, scanProvider, PROVIDER_ENDPOINTS, getWeeklySchedule, setWeeklySchedule, resetWeeklySchedule, scheduleWeeklyReset };

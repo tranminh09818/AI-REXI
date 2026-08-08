@@ -36,6 +36,32 @@ class SQLiteAdapter {
     if (typeof params === 'function') { cb = params; params = []; }
     this._wait(() => this.db.run(sql, params, function(err) { if (cb) cb.call(this, err); }));
   }
+  exec(sql, cb) { this._wait(() => this.db.exec(sql, (err) => { if (cb) cb(err); })); }
+  /**
+   * Thực thi công việc trong 1 transaction (BEGIN/COMMIT/ROLLBACK).
+   * work(tx) nhận tx = { run, get, all } promise-based, tất cả chạy trên cùng 1 connection
+   * → crash giữa chừng sẽ rollback tự động (không để DB nửa vời).
+   */
+  async withTransaction(work) {
+    await new Promise((resolve, reject) => {
+      const start = () => this.db.run('BEGIN', (err) => err ? reject(err) : resolve());
+      if (this.ready) return start();
+      const check = setInterval(() => { if (this.ready) { clearInterval(check); start(); } }, 50);
+      setTimeout(() => { clearInterval(check); start(); }, 5000);
+    });
+    const tx = {
+      run: (sql, params = []) => new Promise((res, rej) => this.db.run(sql, params, function(err) { err ? rej(err) : res(this && this.changes != null ? this.changes : 0); })),
+      get: (sql, params = []) => new Promise((res, rej) => this.db.get(sql, params, (err, row) => err ? rej(err) : res(row))),
+      all: (sql, params = []) => new Promise((res, rej) => this.db.all(sql, params, (err, rows) => err ? rej(err) : res(rows || []))),
+    };
+    try {
+      await work(tx);
+      await new Promise((resolve, reject) => this.db.run('COMMIT', (err) => err ? reject(err) : resolve()));
+    } catch (e) {
+      await new Promise((r) => this.db.run('ROLLBACK', () => r()));
+      throw e;
+    }
+  }
   close(cb) { if (this.db) this.db.close(cb); }
 }
 
@@ -178,6 +204,11 @@ class PostgreSQLAdapter {
   }
   _exec(sql, params, cb, mode) {
     if (!this.pool) { this.queue.push([sql, params, cb, mode]); return; }
+    // mode 'exec': chạy trực tiếp (simple protocol — hỗ trợ multi-statement, không thay ?)
+    if (mode === 'exec') {
+      this.pool.query(sql).then(() => { if (cb) cb(null); }).catch(cb || (() => {}));
+      return;
+    }
     let idx = 0;
     const text = sql.replace(/\?/g, () => `$${++idx}`);
     const values = Array.isArray(params) ? params : [];
@@ -193,6 +224,38 @@ class PostgreSQLAdapter {
   run(sql, params = [], cb) {
     if (typeof params === 'function') { cb = params; params = []; }
     this._exec(sql, params, cb, 'run');
+  }
+  exec(sql, cb) {
+    if (!this.pool) { this.queue.push([sql, [], cb, 'exec']); return; }
+    this.pool.query(sql).then(() => { if (cb) cb(null); }).catch(cb || (() => {}));
+  }
+  /**
+   * Transaction trên 1 connection cố định (pool.connect) — BEGIN/COMMIT/ROLLBACK
+   * không bị rò rỉ qua các connection khác của pool.
+   */
+  async withTransaction(work) {
+    let client;
+    try {
+      if (!this.pool) throw new Error('PostgreSQL not connected');
+      client = await this.pool.connect();
+      const q = (text, values) => {
+        let i = 0;
+        return client.query(text.replace(/\?/g, () => `$${++i}`), values || []);
+      };
+      const tx = {
+        run: async (sql, params = []) => (await q(sql, params)).rowCount || 0,
+        get: async (sql, params = []) => (await q(sql, params)).rows[0] || null,
+        all: async (sql, params = []) => (await q(sql, params)).rows || [],
+      };
+      await client.query('BEGIN');
+      await work(tx);
+      await client.query('COMMIT');
+      client.release();
+      client = null;
+    } catch (e) {
+      if (client) { try { await client.query('ROLLBACK'); } catch (_) {} try { client.release(); } catch (_) {} }
+      throw e;
+    }
   }
   close() { if (this.pool) this.pool.end(); }
 }
@@ -212,6 +275,7 @@ class ParallelAdapter {
     const done = () => { n++; if (n >= this.adapters.length && cb) cb.call(ctx, err); };
     this.adapters.forEach(a => a.run(sql, params, function(e) { if (e) err = e; else ctx.changes += this.changes || 0; done(); }));
   }
+  exec(sql, cb) { this.adapters[0].exec(sql, cb); }
   close() { this.adapters.forEach(a => a.close()); }
 }
 

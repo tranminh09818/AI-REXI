@@ -18,8 +18,12 @@ const agentRoutes = require('./src/routes/agent.routes');
 const { rateLimitMiddleware } = require('./src/middleware/rateLimit.middleware');
 
 const { ensureAdmin, ensureGuestUser } = require('./src/ensure-admin');
-ensureAdmin().catch(console.error);
-ensureGuestUser().catch(console.error);
+const { initDatabase } = require('./src/init-db');
+// FIX PROD: tạo schema trước (PostgreSQL trên Render cần bảng) rồi mới seed admin/guest
+initDatabase().then(() => {
+  ensureAdmin().catch(console.error);
+  ensureGuestUser().catch(console.error);
+}).catch(err => console.error('[init-db] Lỗi khởi tạo schema:', err && err.message));
 
 // ═══════════════════════════════════════════════════════════
 // Global error handlers — prevent uncaught exceptions from

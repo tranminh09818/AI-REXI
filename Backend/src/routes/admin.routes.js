@@ -1,6 +1,6 @@
 /**
  * Admin IPTV Monitor Routes
- * 
+ *
  * GET  /api/admin/iptv/status       - Trạng thái scan mới nhất
  * GET  /api/admin/iptv/stats        - Thống kê tổng hợp (theo quốc gia, danh mục)
  * GET  /api/admin/iptv/channels     - Danh sách kênh (filter: country, status, search, page)
@@ -8,6 +8,10 @@
  * GET  /api/admin/iptv/scan-history - Lịch sử các lần scan
  * GET  /api/admin/iptv/changes      - Kênh mới/mất giữa 2 lần scan gần nhất
  * POST /api/admin/iptv/scan-now     - Kích hoạt scan thủ công
+ *
+ * FIX PROD: dùng adapter db.js (SQLite local / PostgreSQL trên Render) thay vì
+ * better-sqlite3 file cứng — trước đây trên Render đọc file DB riêng rỗng, IPTV
+ * monitor không thấy dữ liệu của DB chính.
  */
 const express = require('express');
 const router = express.Router();
@@ -15,39 +19,21 @@ const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
 const { authMiddleware, adminMiddleware } = require('../middleware/auth.middleware');
+const db = require('../config/db');
 
-const DB_PATH = path.join(__dirname, '..', '..', '..', 'Database', 'tro_ly_ai.db');
-let db;
-try { db = new (require('better-sqlite3'))(DB_PATH); } catch(e) { db = null; }
-function getDB() {
-  if (!db) { try { db = new (require('better-sqlite3'))(DB_PATH); } catch(e) { return null; } }
-  return db;
-}
+const dbNow = () => (db.type === 'sqlite' ? "datetime('now')" : 'NOW()');
 
-// Đảm bảo các bảng IPTV tồn tại (giống schema trong scripts/scan_full.js)
-// → Admin không bị crash khi scan lần đầu chưa chạy.
-function ensureSchema() {
-  const d = getDB();
-  if (!d) return null;
-  try {
-    d.exec(`
-      CREATE TABLE IF NOT EXISTS iptv_scan_log (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, finished_at TEXT, status TEXT DEFAULT 'running', total_channels INTEGER DEFAULT 0, online_channels INTEGER DEFAULT 0, offline_channels INTEGER DEFAULT 0, countries_scanned INTEGER DEFAULT 0, new_channels INTEGER DEFAULT 0, lost_channels INTEGER DEFAULT 0);
-      CREATE TABLE IF NOT EXISTS iptv_channels (id INTEGER PRIMARY KEY AUTOINCREMENT, country TEXT NOT NULL, country_name TEXT DEFAULT '', group_name TEXT DEFAULT '', channel_name TEXT NOT NULL, url TEXT NOT NULL, logo TEXT DEFAULT '', status TEXT DEFAULT 'unknown', latency_ms INTEGER DEFAULT 0, http_code INTEGER DEFAULT 0, last_checked TEXT, last_online TEXT, first_seen TEXT DEFAULT (datetime('now')), scan_id INTEGER REFERENCES iptv_scan_log(id));
-      CREATE TABLE IF NOT EXISTS iptv_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, title TEXT NOT NULL, message TEXT DEFAULT '', data TEXT DEFAULT '{}', is_read INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')));
-      CREATE INDEX IF NOT EXISTS idx_iptv_url ON iptv_channels(url);
-      CREATE INDEX IF NOT EXISTS idx_iptv_country ON iptv_channels(country);
-      CREATE INDEX IF NOT EXISTS idx_iptv_status ON iptv_channels(status);
-      CREATE INDEX IF NOT EXISTS idx_notif_read ON iptv_notifications(is_read);
-      CREATE INDEX IF NOT EXISTS idx_notif_created ON iptv_notifications(created_at DESC);
-    `);
-    return d;
-  } catch (e) { return null; }
-}
+// Promise helpers cho adapter (callback-based)
+const runQ = (sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, function(err) { err ? reject(err) : resolve(this && this.changes != null ? this.changes : 0); }));
+const getQ = (sql, params = []) => new Promise((resolve, reject) => db.get(sql, params, (err, row) => err ? reject(err) : resolve(row)));
+const allQ = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows || [])));
 
-function tableExists(name) {
-  const d = getDB();
-  if (!d) return false;
-  try { return !!d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(name); } catch { return false; }
+// Các bảng IPTV được tạo bởi src/init-db.js khi server khởi động — không tạo lại ở đây.
+function ensureSchema() { return true; }
+
+// Kiểm tra bảng tồn tại (chạy được cả SQLite lẫn PostgreSQL)
+async function tableExists(name) {
+  try { await getQ(`SELECT 1 FROM ${name} LIMIT 1`); return true; } catch (e) { return false; }
 }
 
 const NO_DATA = { success: true, no_data: true, message: 'Chưa có dữ liệu scan. Hãy bấm nút "Quét kênh" để bắt đầu lần đầu tiên.' };
@@ -61,14 +47,13 @@ router.use(authMiddleware);
 router.use(adminMiddleware);
 
 // ─── Trạng thái scan ─────────────────────────────────────────
-router.get('/status', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_channels')) return res.json({ success: true, status: 'no_data', lastScan: null, online: 0, total: 0 });
+router.get('/status', async (req, res) => {
+  if (!(await tableExists('iptv_channels'))) return res.json({ success: true, status: 'no_data', lastScan: null, online: 0, total: 0 });
 
-  const lastScan = d.prepare("SELECT * FROM iptv_scan_log WHERE status='done' ORDER BY id DESC LIMIT 1").get();
-  const totalOnline = d.prepare("SELECT COUNT(*) as cnt FROM iptv_channels WHERE status='online' AND last_checked IS NOT NULL").get();
-  const totalAll = d.prepare("SELECT COUNT(*) as cnt FROM iptv_channels WHERE last_checked IS NOT NULL").get();
-  const running = d.prepare("SELECT * FROM iptv_scan_log WHERE status='running' ORDER BY id DESC LIMIT 1").get();
+  const lastScan = await getQ("SELECT * FROM iptv_scan_log WHERE status='done' ORDER BY id DESC LIMIT 1").catch(() => null);
+  const totalOnline = await getQ("SELECT COUNT(*) as cnt FROM iptv_channels WHERE status='online' AND last_checked IS NOT NULL").catch(() => ({ cnt: 0 }));
+  const totalAll = await getQ("SELECT COUNT(*) as cnt FROM iptv_channels WHERE last_checked IS NOT NULL").catch(() => ({ cnt: 0 }));
+  const running = await getQ("SELECT * FROM iptv_scan_log WHERE status='running' ORDER BY id DESC LIMIT 1").catch(() => null);
 
   res.json({
     success: true,
@@ -81,15 +66,14 @@ router.get('/status', (req, res) => {
 });
 
 // ─── Thống kê ────────────────────────────────────────────────
-router.get('/stats', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_channels')) return res.json(NO_DATA);
+router.get('/stats', async (req, res) => {
+  if (!(await tableExists('iptv_channels'))) return res.json(NO_DATA);
 
-  const totalOnline = d.prepare("SELECT COUNT(*) as cnt FROM iptv_channels WHERE status='online' AND last_checked IS NOT NULL").get()?.cnt || 0;
-  const totalAll = d.prepare("SELECT COUNT(*) as cnt FROM iptv_channels WHERE last_checked IS NOT NULL").get()?.cnt || 0;
-  const countriesScanned = d.prepare("SELECT COUNT(DISTINCT country) as cnt FROM iptv_channels WHERE last_checked IS NOT NULL").get()?.cnt || 0;
+  const totalOnline = (await getQ("SELECT COUNT(*) as cnt FROM iptv_channels WHERE status='online' AND last_checked IS NOT NULL").catch(() => ({ cnt: 0 })))?.cnt || 0;
+  const totalAll = (await getQ("SELECT COUNT(*) as cnt FROM iptv_channels WHERE last_checked IS NOT NULL").catch(() => ({ cnt: 0 })))?.cnt || 0;
+  const countriesScanned = (await getQ("SELECT COUNT(DISTINCT country) as cnt FROM iptv_channels WHERE last_checked IS NOT NULL").catch(() => ({ cnt: 0 })))?.cnt || 0;
 
-  const byCountry = d.prepare(`
+  const byCountry = await allQ(`
     SELECT country, MIN(country_name) as name,
       COUNT(*) as total,
       SUM(CASE WHEN status='online' THEN 1 ELSE 0 END) as online,
@@ -97,14 +81,14 @@ router.get('/stats', (req, res) => {
       ROUND(AVG(CASE WHEN latency_ms > 0 THEN CAST(latency_ms AS REAL) ELSE NULL END)) as avg_latency
     FROM iptv_channels WHERE last_checked IS NOT NULL
     GROUP BY country ORDER BY total DESC
-  `).all();
+  `).catch(() => []);
 
-  const byGroup = d.prepare(`
+  const byGroup = await allQ(`
     SELECT group_name, COUNT(*) as total,
       SUM(CASE WHEN status='online' THEN 1 ELSE 0 END) as online
     FROM iptv_channels WHERE last_checked IS NOT NULL
     GROUP BY group_name ORDER BY total DESC
-  `).all();
+  `).catch(() => []);
 
   res.json({
     success: true,
@@ -120,9 +104,8 @@ router.get('/stats', (req, res) => {
 });
 
 // ─── Danh sách kênh (phân trang + filter) ────────────────────
-router.get('/channels', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_channels')) return res.json(NO_DATA);
+router.get('/channels', async (req, res) => {
+  if (!(await tableExists('iptv_channels'))) return res.json(NO_DATA);
 
   const { country, status, category, search, page = 1, limit = 100 } = req.query;
   const pg = Math.max(1, parseInt(page));
@@ -138,20 +121,19 @@ router.get('/channels', (req, res) => {
   if (search) { clauses.push("channel_name LIKE ?"); params.push(`%${search}%`); }
 
   const whereClause = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
-  const total = d.prepare(`SELECT COUNT(*) as cnt FROM iptv_channels ${whereClause}`).get(...params)?.cnt || 0;
+  const total = (await getQ(`SELECT COUNT(*) as cnt FROM iptv_channels ${whereClause}`, params).catch(() => ({ cnt: 0 })))?.cnt || 0;
 
-  const rows = d.prepare(`
+  const rows = await allQ(`
     SELECT * FROM iptv_channels ${whereClause}
     ORDER BY status DESC, latency_ms ASC LIMIT ? OFFSET ?
-  `).all(...params, lm, offset);
+  `, [...params, lm, offset]).catch(() => []);
 
   res.json({ success: true, total, page: pg, limit: lm, channels: rows });
 });
 
 // ─── Danh sách quốc gia (đầy đủ 250 nước + số lượng kênh) ────
-router.get('/countries', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_channels')) {
+router.get('/countries', async (req, res) => {
+  if (!(await tableExists('iptv_channels'))) {
     // Fallback: trả về 250 quốc gia từ file data nếu DB chưa có
     try {
       const dataFile = path.join(__dirname, '..', '..', '..', 'Frontend', 'src', 'data', 'iptvCountries.js');
@@ -178,7 +160,7 @@ router.get('/countries', (req, res) => {
     return res.json({ success: false, error: 'No data' });
   }
 
-  const dbCountries = d.prepare(`
+  const dbCountries = await allQ(`
     SELECT country, MIN(country_name) as name,
       COUNT(*) as total,
       SUM(CASE WHEN status='online' THEN 1 ELSE 0 END) as online,
@@ -186,9 +168,9 @@ router.get('/countries', (req, res) => {
       ROUND(AVG(CASE WHEN latency_ms > 0 THEN CAST(latency_ms AS REAL) ELSE NULL END)) as avg_latency
     FROM iptv_channels WHERE last_checked IS NOT NULL
     GROUP BY country ORDER BY total DESC
-  `).all();
+  `).catch(() => []);
 
-  // Lấy danh sách đầy đủ 250 quốc guốc gia từ frontend data
+  // Lấy danh sách đầy đủ 250 quốc gia từ frontend data
   let allCountries = [];
   try {
     const dataFile = path.join(__dirname, '..', '..', '..', 'Frontend', 'src', 'data', 'iptvCountries.js');
@@ -219,32 +201,30 @@ router.get('/countries', (req, res) => {
 });
 
 // ─── Lịch sử scan ───────────────────────────────────────────────
-router.get('/scan-history', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_scan_log')) return res.json(NO_DATA);
+router.get('/scan-history', async (req, res) => {
+  if (!(await tableExists('iptv_scan_log'))) return res.json(NO_DATA);
 
-  const history = d.prepare(`
+  const history = await allQ(`
     SELECT id, started_at, finished_at, status, total_channels, online_channels, offline_channels, new_channels, lost_channels
     FROM iptv_scan_log ORDER BY id DESC LIMIT 20
-  `).all();
+  `).catch(() => []);
 
   res.json({ success: true, history });
 });
 
 // ─── Kênh mới / mất ──────────────────────────────────────────
-router.get('/changes', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_channels')) return res.json(NO_DATA);
+router.get('/changes', async (req, res) => {
+  if (!(await tableExists('iptv_channels'))) return res.json(NO_DATA);
 
-  const lastScan = d.prepare("SELECT id FROM iptv_scan_log WHERE status='done' ORDER BY id DESC LIMIT 1").get();
-  const prevScan = d.prepare("SELECT id FROM iptv_scan_log WHERE status='done' AND id < ? ORDER BY id DESC LIMIT 1").get(lastScan?.id);
+  const lastScan = await getQ("SELECT id FROM iptv_scan_log WHERE status='done' ORDER BY id DESC LIMIT 1").catch(() => null);
+  const prevScan = lastScan ? await getQ("SELECT id FROM iptv_scan_log WHERE status='done' AND id < ? ORDER BY id DESC LIMIT 1", [lastScan.id]).catch(() => null) : null;
 
   if (!lastScan || !prevScan) {
     return res.json({ success: true, need_more_scans: true, message: 'Cần ít nhất 2 lần scan để so sánh' });
   }
 
-  const nowOnline = d.prepare("SELECT url, channel_name, country, group_name FROM iptv_channels WHERE status='online' AND scan_id = ?").all(lastScan.id);
-  const prevOnline = d.prepare("SELECT url, channel_name, country, group_name FROM iptv_channels WHERE status='online' AND scan_id = ?").all(prevScan.id);
+  const nowOnline = await allQ("SELECT url, channel_name, country, group_name FROM iptv_channels WHERE status='online' AND scan_id = ?", [lastScan.id]).catch(() => []);
+  const prevOnline = await allQ("SELECT url, channel_name, country, group_name FROM iptv_channels WHERE status='online' AND scan_id = ?", [prevScan.id]).catch(() => []);
 
   const nowSet = new Set(nowOnline.map(r => r.url));
   const prevSet = new Set(prevOnline.map(r => r.url));
@@ -264,9 +244,8 @@ router.get('/changes', (req, res) => {
 });
 
 // ─── Thêm kênh mới ──────────────────────────────────────────
-router.post('/channels', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_channels')) return res.json(NO_DATA);
+router.post('/channels', async (req, res) => {
+  if (!(await tableExists('iptv_channels'))) return res.json(NO_DATA);
 
   const { channel_name, name, url, logo, group_name, group, country, country_name, status, latency_ms } = req.body;
   const chName = (channel_name || name || '').trim();
@@ -277,26 +256,32 @@ router.post('/channels', (req, res) => {
   if (!chName || !url) return res.json({ success: false, error: 'Cần nhập tên kênh và URL' });
   if (!/^https?:\/\//.test(url)) return res.json({ success: false, error: 'URL phải bắt đầu bằng http:// hoặc https://' });
 
-  const dup = d.prepare('SELECT id FROM iptv_channels WHERE url = ?').get(url);
+  const dup = await getQ('SELECT id FROM iptv_channels WHERE url = ?', [url]).catch(() => null);
   if (dup) return res.json({ success: false, error: 'Kênh với URL này đã tồn tại' });
 
-  const info = d.prepare(`
-    INSERT INTO iptv_channels (country, country_name, group_name, channel_name, url, logo, status, latency_ms, last_checked)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-  `).run(ctry || 'XX', country_name || '', grp, chName, url, logo || '', st, parseInt(latency_ms) || 0);
+  let id = 0;
+  if (db.type === 'postgresql') {
+    const r = await getQ(`INSERT INTO iptv_channels (country, country_name, group_name, channel_name, url, logo, status, latency_ms, last_checked)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${dbNow()}) RETURNING id`, [ctry || 'XX', country_name || '', grp, chName, url, logo || '', st, parseInt(latency_ms) || 0]);
+    id = r.id;
+  } else {
+    await runQ(`INSERT INTO iptv_channels (country, country_name, group_name, channel_name, url, logo, status, latency_ms, last_checked)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${dbNow()})`, [ctry || 'XX', country_name || '', grp, chName, url, logo || '', st, parseInt(latency_ms) || 0]);
+    const r = await getQ('SELECT last_insert_rowid() AS id');
+    id = r.id;
+  }
 
-  res.json({ success: true, id: info.lastInsertRowid, message: 'Đã thêm kênh thành công' });
+  res.json({ success: true, id, message: 'Đã thêm kênh thành công' });
 });
 
 // ─── Cập nhật kênh ──────────────────────────────────────────
-router.put('/channels/:id', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_channels')) return res.json(NO_DATA);
+router.put('/channels/:id', async (req, res) => {
+  if (!(await tableExists('iptv_channels'))) return res.json(NO_DATA);
 
   const id = parseInt(req.params.id);
   if (!id) return res.json({ success: false, error: 'ID không hợp lệ' });
 
-  const row = d.prepare('SELECT * FROM iptv_channels WHERE id = ?').get(id);
+  const row = await getQ('SELECT * FROM iptv_channels WHERE id = ?', [id]).catch(() => null);
   if (!row) return res.json({ success: false, error: 'Không tìm thấy kênh' });
 
   const { channel_name, name, url, logo, group_name, group, country, country_name, status, latency_ms } = req.body;
@@ -311,36 +296,34 @@ router.put('/channels/:id', (req, res) => {
   if (!chName || !newUrl) return res.json({ success: false, error: 'Cần nhập tên kênh và URL' });
 
   if (newUrl !== row.url) {
-    const dup = d.prepare('SELECT id FROM iptv_channels WHERE url = ? AND id != ?').get(newUrl, id);
+    const dup = await getQ('SELECT id FROM iptv_channels WHERE url = ? AND id != ?', [newUrl, id]).catch(() => null);
     if (dup) return res.json({ success: false, error: 'Kênh với URL này đã tồn tại' });
   }
 
-  d.prepare(`
-    UPDATE iptv_channels SET channel_name=?, url=?, logo=?, group_name=?, country=?, country_name=?, status=?, latency_ms=?, last_checked=datetime('now') WHERE id=?
-  `).run(chName, newUrl, logo !== undefined ? logo : row.logo, grp, ctry, cName || '', st, lat, id);
+  await runQ(`
+    UPDATE iptv_channels SET channel_name=?, url=?, logo=?, group_name=?, country=?, country_name=?, status=?, latency_ms=?, last_checked=${dbNow()} WHERE id=?
+  `, [chName, newUrl, logo !== undefined ? logo : row.logo, grp, ctry, cName || '', st, lat, id]);
 
   res.json({ success: true, message: 'Đã cập nhật kênh' });
 });
 
 // ─── Xóa kênh ──────────────────────────────────────────────
-router.delete('/channels/:id', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_channels')) return res.json(NO_DATA);
+router.delete('/channels/:id', async (req, res) => {
+  if (!(await tableExists('iptv_channels'))) return res.json(NO_DATA);
 
   const id = parseInt(req.params.id);
   if (!id) return res.json({ success: false, error: 'ID không hợp lệ' });
 
-  const row = d.prepare('SELECT id FROM iptv_channels WHERE id = ?').get(id);
+  const row = await getQ('SELECT id FROM iptv_channels WHERE id = ?', [id]).catch(() => null);
   if (!row) return res.json({ success: false, error: 'Không tìm thấy kênh' });
 
-  d.prepare('DELETE FROM iptv_channels WHERE id = ?').run(id);
+  await runQ('DELETE FROM iptv_channels WHERE id = ?', [id]);
   res.json({ success: true, message: 'Đã xóa kênh' });
 });
 
 // ─── Export M3U / JSON / CSV ────────────────────────────────
-router.get('/channels/export/:format', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_channels')) return res.json(NO_DATA);
+router.get('/channels/export/:format', async (req, res) => {
+  if (!(await tableExists('iptv_channels'))) return res.json(NO_DATA);
 
   const { format } = req.params;
   const { country, status, search, category } = req.query;
@@ -351,7 +334,7 @@ router.get('/channels/export/:format', (req, res) => {
   if (category) { clauses.push('group_name = ?'); params.push(category); }
   if (search) { clauses.push('channel_name LIKE ?'); params.push(`%${search}%`); }
   const whereClause = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
-  const rows = d.prepare(`SELECT * FROM iptv_channels ${whereClause} ORDER BY country, group_name, channel_name`).all(...params);
+  const rows = await allQ(`SELECT * FROM iptv_channels ${whereClause} ORDER BY country, group_name, channel_name`, params).catch(() => []);
 
   const stamp = Date.now();
   if (format === 'm3u') {
@@ -381,50 +364,45 @@ router.get('/channels/export/:format', (req, res) => {
 });
 
 // ─── Notifications ────────────────────────────────────────────
-router.get('/notifications', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_notifications')) return res.json({ success: true, unread: 0, notifications: [] });
+router.get('/notifications', async (req, res) => {
+  if (!(await tableExists('iptv_notifications'))) return res.json({ success: true, unread: 0, notifications: [] });
 
   const { limit = 30 } = req.query;
-  const rows = d.prepare('SELECT * FROM iptv_notifications ORDER BY created_at DESC LIMIT ?').all(parseInt(limit));
-  const unread = d.prepare('SELECT COUNT(*) as c FROM iptv_notifications WHERE is_read = 0').get()?.c || 0;
+  const rows = await allQ('SELECT * FROM iptv_notifications ORDER BY created_at DESC LIMIT ?', [parseInt(limit)]).catch(() => []);
+  const unread = (await getQ('SELECT COUNT(*) as c FROM iptv_notifications WHERE is_read = 0').catch(() => ({ c: 0 })))?.c || 0;
   res.json({ success: true, unread, notifications: rows });
 });
 
-router.put('/notifications/read-all', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_notifications')) return res.json({ success: true });
-  d.prepare('UPDATE iptv_notifications SET is_read = 1 WHERE is_read = 0').run();
+router.put('/notifications/read-all', async (req, res) => {
+  if (!(await tableExists('iptv_notifications'))) return res.json({ success: true });
+  await runQ('UPDATE iptv_notifications SET is_read = 1 WHERE is_read = 0');
   res.json({ success: true, message: 'Đã đánh dấu tất cả đã đọc' });
 });
 
-router.put('/notifications/:id/read', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_notifications')) return res.json({ success: true });
+router.put('/notifications/:id/read', async (req, res) => {
+  if (!(await tableExists('iptv_notifications'))) return res.json({ success: true });
   const id = parseInt(req.params.id);
   if (!id) return res.json({ success: false, error: 'ID không hợp lệ' });
-  d.prepare('UPDATE iptv_notifications SET is_read = 1 WHERE id = ?').run(id);
+  await runQ('UPDATE iptv_notifications SET is_read = 1 WHERE id = ?', [id]);
   res.json({ success: true });
 });
 
-router.delete('/notifications/:id', (req, res) => {
-  const d = ensureSchema();
-  if (!d || !tableExists('iptv_notifications')) return res.json({ success: true });
+router.delete('/notifications/:id', async (req, res) => {
+  if (!(await tableExists('iptv_notifications'))) return res.json({ success: true });
   const id = parseInt(req.params.id);
   if (!id) return res.json({ success: false, error: 'ID không hợp lệ' });
-  d.prepare('DELETE FROM iptv_notifications WHERE id = ?').run(id);
+  await runQ('DELETE FROM iptv_notifications WHERE id = ?', [id]);
   res.json({ success: true });
 });
 
 // ─── Kích hoạt scan thủ công ────────────────────────────────────
-router.post('/scan-now', (req, res) => {
+router.post('/scan-now', async (req, res) => {
   res.json({ success: true, message: 'Scan started! Check /status in 20s.' });
 
   // Tạo notification "đang scan"
   try {
-    const d = ensureSchema();
-    if (d && tableExists('iptv_notifications')) {
-      d.prepare("INSERT INTO iptv_notifications (type, title, message) VALUES (?, ?, ?)").run('scan_started', 'Bắt đầu quét', 'Đã kích hoạt quét kênh thủ công. Quá trình quét có thể mất vài phút...');
+    if (await tableExists('iptv_notifications')) {
+      await runQ("INSERT INTO iptv_notifications (type, title, message) VALUES (?, ?, ?)", ['scan_started', 'Bắt đầu quét', 'Đã kích hoạt quét kênh thủ công. Quá trình quét có thể mất vài phút...']);
     }
   } catch {}
 

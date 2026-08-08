@@ -3,11 +3,28 @@ const bcrypt = require('bcryptjs');
 const db = require('./config/db');
 
 let ADMIN_SEED = null;
-try {
-  ADMIN_SEED = require('D:/AI REXI/Database/admin-seed.js');
-                    } catch (e) {
-  console.log('[ADMIN-SEED] No admin-seed.js found, skipping');
-                    }
+// FIX PROD: ưu tiên cấu hình từ env (ADMIN_EMAIL + ADMIN_PASSWORD) — dùng được trên Render,
+// không phụ thuộc file 'D:/AI REXI/...' chỉ tồn tại trên máy local.
+const envEmail = (process.env.ADMIN_EMAIL || '').trim();
+const envPassword = (process.env.ADMIN_PASSWORD || '').trim();
+if (envEmail && envPassword) {
+  ADMIN_SEED = {
+    email: envEmail,
+    mat_khau_ma_hoa_hash: bcrypt.hashSync(envPassword, 10),
+    ten_day_du: (process.env.ADMIN_NAME || 'Admin').trim()
+  };
+  console.log('[ADMIN-SEED] Admin seed từ env (ADMIN_EMAIL)');
+}
+if (!ADMIN_SEED) {
+  try {
+    ADMIN_SEED = require('D:/AI REXI/Database/admin-seed.js');
+  } catch (e) {
+    // Fallback cuối: môi trường mới (máy khác / Render) không có file D:\ — vẫn đảm bảo
+    // tồn tại 1 tài khoản admin để đăng nhập lần đầu, sau đó nên set ADMIN_EMAIL/ADMIN_PASSWORD.
+    ADMIN_SEED = { email: 'admin@rexi.com', mat_khau_ma_hoa_hash: null, ten_day_du: 'Administrator' };
+    console.warn('[ADMIN-SEED] ⚠️ Không có ADMIN_EMAIL/ADMIN_PASSWORD env và không có admin-seed.js — dùng fallback admin@rexi.com (mật khẩu ngẫu nhiên in bên dưới). Nên set ADMIN_EMAIL + ADMIN_PASSWORD trên Render để cấu hình cố định.');
+  }
+}
 
 /**
  * Đảm bảo tài khoản admin cố định luôn tồn tại trong DB.

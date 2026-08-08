@@ -1,0 +1,78 @@
+/**
+ * init-db.js — Tự động tạo schema (CREATE TABLE IF NOT EXISTS) khi server khởi động.
+ * Hỗ trợ cả SQLite (local) và PostgreSQL (Render) — FIX lỗi "chỉ chạy trên máy local"
+ * vì trước đây schema chỉ tồn tại sẵn trong file SQLite, Postgres trên prod bị rỗng bảng.
+ */
+const db = require('./config/db');
+
+// ─── Schema gốc (dump từ SQLite chuẩn) — sắp theo thứ tự FK ─────────
+const TABLES = [
+  `CREATE TABLE ai_providers (ma_nha_cung_cap TEXT PRIMARY KEY, ten_hien_thi TEXT NOT NULL, base_url TEXT, can_api_key INTEGER DEFAULT 1, placeholder TEXT, thu_tu INTEGER DEFAULT 0, kich_hoat INTEGER DEFAULT 1, ngay_tao TEXT DEFAULT CURRENT_TIMESTAMP, ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE nguoi_dung ( ma_nguoi_dung TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, mat_khau_ma_hoa TEXT NOT NULL, ten_day_du TEXT, phan_quyen TEXT DEFAULT 'user', anh_dai_dien TEXT, otp_code TEXT, otp_expiry INTEGER, trang_thai TEXT DEFAULT 'active', ngay_tao DATETIME DEFAULT CURRENT_TIMESTAMP , _sync_at DATETIME)`,
+  `CREATE TABLE ai_models (ma_model TEXT PRIMARY KEY, ma_nha_cung_cap TEXT NOT NULL, ten_hien_thi TEXT NOT NULL, loai TEXT DEFAULT 'free', thu_tu_hien_thi INTEGER DEFAULT 0, kich_hoat INTEGER DEFAULT 1, ngay_tao TEXT DEFAULT CURRENT_TIMESTAMP, ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (ma_nha_cung_cap) REFERENCES ai_providers(ma_nha_cung_cap))`,
+  `CREATE TABLE cuoc_hoi_thoai ( ma_hoi_thoai TEXT PRIMARY KEY, ma_nguoi_dung TEXT NOT NULL, ma_thu_muc TEXT, tieu_de TEXT DEFAULT 'Trò chuyện mới', ten_mo_hinh_ai TEXT DEFAULT 'Gemini 3.5 Flash', trang_thai TEXT DEFAULT 'dang_mo', ngay_tao DATETIME DEFAULT CURRENT_TIMESTAMP, ngay_cap_nhat DATETIME DEFAULT CURRENT_TIMESTAMP, ngay_xoa DATETIME, _sync_at DATETIME, FOREIGN KEY (ma_nguoi_dung) REFERENCES nguoi_dung(ma_nguoi_dung) )`,
+  `CREATE TABLE tin_nhan ( ma_tin_nhan TEXT PRIMARY KEY, ma_hoi_thoai TEXT NOT NULL, vai_tro TEXT NOT NULL, noi_dung TEXT NOT NULL, ngay_gui DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (ma_hoi_thoai) REFERENCES cuoc_hoi_thoai(ma_hoi_thoai) )`,
+  `CREATE TABLE khoa_api ( ma_khoa TEXT PRIMARY KEY, ma_nguoi_dung TEXT, ten_nha_cung_cap TEXT NOT NULL, gia_tri_khoa TEXT NOT NULL, ngay_tao DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (ma_nguoi_dung) REFERENCES nguoi_dung(ma_nguoi_dung) )`,
+  `CREATE TABLE ky_nang ( ma_ky_nang TEXT PRIMARY KEY, ten_ky_nang TEXT NOT NULL, tieu_de TEXT, mo_ta TEXT, trang_thai TEXT DEFAULT 'kich_hoat' )`,
+  `CREATE TABLE bo_nho_dai_han ( ma_bo_nho TEXT PRIMARY KEY, loai TEXT DEFAULT 'thong_tin_user', noi_dung TEXT NOT NULL, do_uu_tien INTEGER DEFAULT 5, ngay_tao DATETIME DEFAULT CURRENT_TIMESTAMP , ma_nguoi_dung TEXT, _sync_at DATETIME)`,
+  `CREATE TABLE app_settings ( khoa TEXT PRIMARY KEY, gia_tri TEXT )`,
+  `CREATE TABLE model_scan_cache ( ma_model TEXT NOT NULL, ma_nha_cung_cap TEXT NOT NULL, trang_thai TEXT NOT NULL, do_tre_ms INTEGER DEFAULT 0, loi_chi_tiet TEXT, thoi_gian_quet TEXT DEFAULT (datetime('now')), PRIMARY KEY (ma_model, ma_nha_cung_cap) )`,
+  `CREATE TABLE provider_scan_log ( ma_nha_cung_cap TEXT PRIMARY KEY, lan_quet_cuoi TEXT DEFAULT (datetime('now')), tong_model INTEGER DEFAULT 0, model_hoat_dong INTEGER DEFAULT 0 )`,
+  `CREATE TABLE _sync_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT NOT NULL, operation TEXT NOT NULL, row_id TEXT, target_db TEXT NOT NULL, status TEXT NOT NULL, error TEXT, synced_at TEXT DEFAULT CURRENT_TIMESTAMP )`,
+  `CREATE TABLE _sync_queue ( id INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT NOT NULL, operation TEXT NOT NULL, row_id TEXT, row_data TEXT, status TEXT DEFAULT 'pending', error TEXT, retry_count INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP )`,
+  `CREATE TABLE iptv_scan_log (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, finished_at TEXT, status TEXT DEFAULT 'running', total_channels INTEGER DEFAULT 0, online_channels INTEGER DEFAULT 0, offline_channels INTEGER DEFAULT 0, countries_scanned INTEGER DEFAULT 0, new_channels INTEGER DEFAULT 0, lost_channels INTEGER DEFAULT 0)`,
+  `CREATE TABLE iptv_channels (id INTEGER PRIMARY KEY AUTOINCREMENT, country TEXT NOT NULL, country_name TEXT DEFAULT '', group_name TEXT DEFAULT '', channel_name TEXT NOT NULL, url TEXT NOT NULL, logo TEXT DEFAULT '', status TEXT DEFAULT 'unknown', latency_ms INTEGER DEFAULT 0, http_code INTEGER DEFAULT 0, last_checked TEXT, last_online TEXT, first_seen TEXT DEFAULT (datetime('now')), scan_id INTEGER REFERENCES iptv_scan_log(id))`,
+  `CREATE TABLE iptv_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, title TEXT NOT NULL, message TEXT DEFAULT '', data TEXT DEFAULT '{}', is_read INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))`,
+  `CREATE TABLE repo_summaries ( full_name TEXT PRIMARY KEY, summary TEXT DEFAULT '', language TEXT DEFAULT '', updated_at TEXT DEFAULT (datetime('now', 'localtime')) )`,
+  `CREATE TABLE saved_repos ( id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT UNIQUE NOT NULL, owner TEXT, name TEXT, description TEXT, language TEXT, stars INTEGER DEFAULT 0, forks INTEGER DEFAULT 0, stars_gained INTEGER DEFAULT 0, period TEXT DEFAULT '', url TEXT, saved_at TEXT DEFAULT (datetime('now', 'localtime')) )`,
+  `CREATE TABLE star_snapshots ( id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, stars INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now', 'localtime')), UNIQUE(full_name, created_at) )`,
+  `CREATE TABLE starred_repos ( id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT UNIQUE NOT NULL, owner TEXT, name TEXT, starred_at TEXT DEFAULT (datetime('now', 'localtime')) )`,
+  `CREATE TABLE trending_cache ( id INTEGER PRIMARY KEY AUTOINCREMENT, language TEXT NOT NULL DEFAULT '', since TEXT NOT NULL DEFAULT 'daily', repos_json TEXT NOT NULL, fetched_at TEXT DEFAULT (datetime('now', 'localtime')), UNIQUE(language, since) )`,
+  `CREATE TABLE trending_notifications ( id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, owner TEXT, name TEXT, description TEXT DEFAULT '', language TEXT DEFAULT '', stars INTEGER DEFAULT 0, stars_gained INTEGER DEFAULT 0, period TEXT DEFAULT '', url TEXT, is_read INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now', 'localtime')) )`,
+];
+
+const INDEXES = [
+  'CREATE INDEX idx_iptv_country ON iptv_channels(country)',
+  'CREATE INDEX idx_iptv_status ON iptv_channels(status)',
+  'CREATE INDEX idx_iptv_url ON iptv_channels(url)',
+  'CREATE INDEX idx_notif_created ON iptv_notifications(created_at DESC)',
+  'CREATE INDEX idx_notif_read ON iptv_notifications(is_read)',
+  'CREATE INDEX idx_sync_queue_status ON _sync_queue(status, created_at)',
+];
+
+// Chuyển DDL SQLite → PostgreSQL
+function toPg(ddl) {
+  return ddl
+    .replace(/,? *--[^\n]*/g, '')                                   // bỏ comment inline
+    .replace(/AUTOINCREMENT/gi, '')                                 // PG: SERIAL thay autoincrement
+    .replace(/INTEGER PRIMARY KEY/gi, 'SERIAL PRIMARY KEY')
+    .replace(/DEFAULT \(datetime\('now', *'localtime'\)\)/gi, 'DEFAULT NOW()')
+    .replace(/DEFAULT \(datetime\('now'\)\)/gi, 'DEFAULT NOW()')
+    .replace(/\bDATETIME\b/gi, 'TIMESTAMP')
+    .replace(/\bBLOB\b/gi, 'BYTEA');
+}
+
+function execSql(sql) {
+  return new Promise((resolve, reject) => db.exec(sql, (err) => err ? reject(err) : resolve()));
+}
+
+/**
+ * Khởi tạo schema — chạy mỗi lần server khởi động (idempotent, IF NOT EXISTS).
+ * Gọi TRƯỚC ensureAdmin/ensureGuestUser để bảng đã tồn tại.
+ */
+async function initDatabase() {
+  const isPg = db.type === 'postgresql';
+  let created = 0;
+  for (const ddl of TABLES) {
+    const sql = (isPg ? toPg(ddl) : ddl)
+      .replace(/^CREATE TABLE /, 'CREATE TABLE IF NOT EXISTS ');
+    try { await execSql(sql); created++; } catch (e) { console.warn('[init-db] Bảng đã tồn tại/bỏ qua:', (e.message || e).slice(0, 120)); }
+  }
+  for (const idx of INDEXES) {
+    const sql = idx.replace(/^CREATE INDEX /, 'CREATE INDEX IF NOT EXISTS ');
+    try { await execSql(sql); } catch (e) { /* index đã có */ }
+  }
+  console.log(`[init-db] Schema sẵn sàng (${isPg ? 'PostgreSQL' : db.type}): ${created}/${TABLES.length} bảng`);
+}
+
+module.exports = { initDatabase };

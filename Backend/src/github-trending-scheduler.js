@@ -1,83 +1,39 @@
 /**
  * GitHub Trending Daily Scheduler
- * 
- * Chạy mỗi 24h để scrape github.com/trending và cache vào SQLite.
- * Tích hợp vào server.js khi khởi động.
+ *
+ * Chạy mỗi 24h để scrape github.com/trending và cache vào CSDL.
+ * FIX PROD: dùng adapter db.js (SQLite local / PostgreSQL trên Render) thay vì
+ * better-sqlite3 file cứng — trước đây trên Render sẽ tự tạo file DB rỗng riêng,
+ * dữ liệu trending/saved/starred bị tách khỏi DB chính và mất mỗi lần redeploy.
  */
-const path = require('path');
 const Groq = require('groq-sdk');
+const db = require('./config/db');
 
-const DB_PATH = path.join(__dirname, '..', '..', 'Database', 'tro_ly_ai.db');
 const FETCH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 giờ
 
-let db;
+const isSqlite = db.type === 'sqlite';
+const NOW = () => (isSqlite ? "datetime('now', 'localtime')" : 'NOW()');
+
 let timer = null;
 
-// ─── DB Init ──────────────────────────────────────────────
-function initDB() {
-  try {
-    db = new (require('better-sqlite3'))(DB_PATH);
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS trending_cache (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        language TEXT NOT NULL DEFAULT '',
-        since TEXT NOT NULL DEFAULT 'daily',
-        repos_json TEXT NOT NULL,
-        fetched_at TEXT DEFAULT (datetime('now', 'localtime')),
-        UNIQUE(language, since)
-      )
-    `);
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS trending_notifications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        full_name TEXT NOT NULL,
-        owner TEXT,
-        name TEXT,
-        description TEXT DEFAULT '',
-        language TEXT DEFAULT '',
-        stars INTEGER DEFAULT 0,
-        stars_gained INTEGER DEFAULT 0,
-        period TEXT DEFAULT '',
-        url TEXT,
-        is_read INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT (datetime('now', 'localtime'))
-      )
-    `);
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS repo_summaries (
-        full_name TEXT PRIMARY KEY,
-        summary TEXT DEFAULT '',
-        language TEXT DEFAULT '',
-        updated_at TEXT DEFAULT (datetime('now', 'localtime'))
-      )
-    `);
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS star_snapshots (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        full_name TEXT NOT NULL,
-        stars INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT (datetime('now', 'localtime')),
-        UNIQUE(full_name, created_at)
-      )
-    `);
-    console.log('[GitHub Scheduler] DB table trending_cache ready');
-    return true;
-  } catch (e) {
-    console.error('[GitHub Scheduler] DB init failed:', e.message);
-    return false;
-  }
+// ─── Promise helpers cho adapter (callback-based) ─────────────
+function runQ(sql, params = []) {
+  return new Promise((resolve, reject) => db.run(sql, params, function(err) { err ? reject(err) : resolve(this && this.changes != null ? this.changes : 0); }));
+}
+function getQ(sql, params = []) {
+  return new Promise((resolve, reject) => db.get(sql, params, (err, row) => err ? reject(err) : resolve(row)));
+}
+function allQ(sql, params = []) {
+  return new Promise((resolve, reject) => db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows || [])));
 }
 
-function getDB() {
-  if (!db) {
-    try {
-      db = new (require('better-sqlite3'))(DB_PATH);
-      return db;
-    } catch (e) {
-      return null;
-    }
-  }
-  return db;
+// ─── DB Init ──────────────────────────────────────────────────
+// Các bảng (trending_cache, trending_notifications, repo_summaries,
+// star_snapshots, saved_repos, starred_repos) được tạo bởi src/init-db.js khi
+// server khởi động — KHÔNG tạo lại ở đây (tránh trùng schema, hỗ trợ Postgres).
+function initDB() {
+  console.log('[GitHub Scheduler] DB ready (schema từ init-db, adapter ' + db.type + ')');
+  return true;
 }
 
 // ─── Scraping Function ────────────────────────────────────
@@ -185,18 +141,15 @@ async function scrapeTrending(language = '', since = 'daily') {
 }
 
 // ─── Cache to DB ──────────────────────────────────────────
-function cacheRepos(language, since, repos) {
-  const d = getDB();
-  if (!d) return false;
-
+async function cacheRepos(language, since, repos) {
   try {
-    d.prepare(`
+    await runQ(`
       INSERT INTO trending_cache (language, since, repos_json, fetched_at)
-      VALUES (?, ?, ?, datetime('now', 'localtime'))
+      VALUES (?, ?, ?, ${NOW()})
       ON CONFLICT(language, since) DO UPDATE SET
         repos_json = excluded.repos_json,
         fetched_at = excluded.fetched_at
-    `).run(language, since, JSON.stringify(repos));
+    `, [language, since, JSON.stringify(repos)]);
     return true;
   } catch (e) {
     console.error('[GitHub Scheduler] Cache write error:', e.message);
@@ -205,35 +158,23 @@ function cacheRepos(language, since, repos) {
 }
 
 // ─── Read from Cache ──────────────────────────────────────
-function getCachedRepos(language = '', since = 'daily') {
-  const d = getDB();
-  if (!d) return null;
-
+async function getCachedRepos(language = '', since = 'daily') {
   try {
-    const row = d.prepare(
-      'SELECT repos_json, fetched_at FROM trending_cache WHERE language = ? AND since = ?'
-    ).get(language, since);
-
+    const row = await getQ(
+      'SELECT repos_json, fetched_at FROM trending_cache WHERE language = ? AND since = ?',
+      [language, since]
+    );
     if (!row) return null;
-
-    return {
-      repos: JSON.parse(row.repos_json),
-      fetched_at: row.fetched_at,
-    };
+    return { repos: JSON.parse(row.repos_json), fetched_at: row.fetched_at };
   } catch (e) {
     return null;
   }
 }
 
 // ─── Get Cache Status ─────────────────────────────────────
-function getCacheStatus() {
-  const d = getDB();
-  if (!d) return { cached: 0, repos: [] };
-
+async function getCacheStatus() {
   try {
-    const rows = d.prepare(
-      'SELECT language, since, fetched_at FROM trending_cache ORDER BY fetched_at DESC'
-    ).all();
+    const rows = await allQ('SELECT language, since, fetched_at FROM trending_cache ORDER BY fetched_at DESC');
     return { cached: rows.length, repos: rows };
   } catch (e) {
     return { cached: 0, repos: [] };
@@ -244,14 +185,8 @@ function getCacheStatus() {
 async function refreshAllCaches() {
   console.log('[GitHub Scheduler] Starting daily refresh...');
 
-  const d = getDB();
-  if (!d) {
-    console.error('[GitHub Scheduler] DB not available');
-    return;
-  }
-
   // Lấy danh sách language + since đang cache
-  const cached = d.prepare('SELECT DISTINCT language, since FROM trending_cache').all();
+  const cached = await allQ('SELECT DISTINCT language, since FROM trending_cache').catch(() => []);
 
   // Luôn refresh daily cho tất cả (language = '') và các ngôn ngữ đã cache
   const tasks = [
@@ -266,8 +201,8 @@ async function refreshAllCaches() {
   for (const task of tasks) {
     try {
       const repos = await scrapeTrending(task.language, task.since);
-      detectNewRepos(task.language, task.since, repos);
-      cacheRepos(task.language, task.since, repos);
+      await detectNewRepos(task.language, task.since, repos);
+      await cacheRepos(task.language, task.since, repos);
       successCount++;
       console.log(`[GitHub Scheduler] ✓ Cached ${task.language || 'all'} (${task.since}): ${repos.length} repos`);
 
@@ -280,9 +215,9 @@ async function refreshAllCaches() {
   }
 
   console.log(`[GitHub Scheduler] Refresh complete: ${successCount} success, ${failCount} failed`);
-  cleanupNotifications();
-  snapshotSavedRepoStars();
-  sendDailyDigest();
+  await cleanupNotifications();
+  await snapshotSavedRepoStars();
+  await sendDailyDigest();
 }
 
 // ─── Scheduler ────────────────────────────────────────────
@@ -319,41 +254,33 @@ function stopGitHubScheduler() {
 }
 
 // ─── Notifications (DB-backed) ─────────────────────────────
-function getUnreadCount() {
-  const d = getDB();
-  if (!d) return 0;
+async function getUnreadCount() {
   try {
-    const row = d.prepare('SELECT COUNT(*) AS c FROM trending_notifications WHERE is_read = 0').get();
-    return row ? row.c : 0;
+    const row = await getQ('SELECT COUNT(*) AS c FROM trending_notifications WHERE is_read = 0');
+    return row ? Number(row.c || 0) : 0;
   } catch (e) {
     return 0;
   }
 }
 
-function getNotifications(limit = 20, unreadOnly = false) {
-  const d = getDB();
-  if (!d) return [];
+async function getNotifications(limit = 20, unreadOnly = false) {
   try {
     const sql = unreadOnly
       ? 'SELECT * FROM trending_notifications WHERE is_read = 0 ORDER BY created_at DESC LIMIT ?'
       : 'SELECT * FROM trending_notifications ORDER BY created_at DESC LIMIT ?';
-    return d.prepare(sql).all(limit);
+    return await allQ(sql, [limit]);
   } catch (e) {
     return [];
   }
 }
 
-function markAsRead(ids = null) {
-  const d = getDB();
-  if (!d) return 0;
+async function markAsRead(ids = null) {
   try {
     if (Array.isArray(ids) && ids.length > 0) {
       const placeholders = ids.map(() => '?').join(',');
-      const info = d.prepare(`UPDATE trending_notifications SET is_read = 1 WHERE id IN (${placeholders})`).run(...ids);
-      return info.changes;
+      return await runQ(`UPDATE trending_notifications SET is_read = 1 WHERE id IN (${placeholders})`, ids);
     }
-    const info = d.prepare('UPDATE trending_notifications SET is_read = 1 WHERE is_read = 0').run();
-    return info.changes;
+    return await runQ('UPDATE trending_notifications SET is_read = 1 WHERE is_read = 0');
   } catch (e) {
     return 0;
   }
@@ -366,16 +293,12 @@ async function getGroqClient() {
   try {
     let key = process.env.GROQ_API_KEY;
     if (!key || key === 'YOUR_GROQ_API_KEY_HERE') {
-      const d = getDB();
-      if (d) {
-        try {
-          const row = d.prepare("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'groq'").get();
-          if (row && row.gia_tri_khoa) key = row.gia_tri_khoa;
-        } catch (e) { /* ignore */ }
-      }
+      try {
+        const row = await getQ("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'groq'");
+        if (row && row.gia_tri_khoa) key = row.gia_tri_khoa;
+      } catch (e) { /* ignore */ }
     }
     if (!key) return null;
-    const Groq = require('groq-sdk');
     _groqClient = new Groq({ apiKey: key });
     return _groqClient;
   } catch (e) {
@@ -384,29 +307,26 @@ async function getGroqClient() {
   }
 }
 
-function getCachedSummary(fullName) {
-  const d = getDB();
-  if (!d) return '';
+async function getCachedSummary(fullName) {
   try {
-    const row = d.prepare('SELECT summary FROM repo_summaries WHERE full_name = ?').get(fullName);
+    const row = await getQ('SELECT summary FROM repo_summaries WHERE full_name = ?', [fullName]);
     return row ? row.summary : '';
   } catch (e) {
     return '';
   }
 }
 
-function saveSummary(fullName, summary, language = '') {
-  const d = getDB();
-  if (!d || !summary) return false;
+async function saveSummary(fullName, summary, language = '') {
+  if (!summary) return false;
   try {
-    d.prepare(`
+    await runQ(`
       INSERT INTO repo_summaries (full_name, summary, language, updated_at)
-      VALUES (?, ?, ?, datetime('now', 'localtime'))
+      VALUES (?, ?, ?, ${NOW()})
       ON CONFLICT(full_name) DO UPDATE SET
         summary = excluded.summary,
         language = excluded.language,
         updated_at = excluded.updated_at
-    `).run(fullName, summary, language);
+    `, [fullName, summary, language]);
     return true;
   } catch (e) {
     return false;
@@ -424,7 +344,7 @@ async function generateRepoSummaries(repos) {
     const batch = repos.slice(i, i + 5);
     const promises = batch.map(async (repo) => {
       if (repo.ai_summary) return repo;
-      const cached = getCachedSummary(repo.full_name);
+      const cached = await getCachedSummary(repo.full_name);
       if (cached) {
         repo.ai_summary = cached;
         return repo;
@@ -440,7 +360,7 @@ async function generateRepoSummaries(repos) {
         const summary = response.choices[0] && response.choices[0].message && response.choices[0].message.content;
         if (summary) {
           repo.ai_summary = summary.trim();
-          saveSummary(repo.full_name, repo.ai_summary, repo.language || '');
+          await saveSummary(repo.full_name, repo.ai_summary, repo.language || '');
         }
       } catch (e) {
         console.error('[GitHub Scheduler] Summary failed for ' + repo.full_name + ':', e.message);
@@ -455,10 +375,8 @@ async function generateRepoSummaries(repos) {
 
 // ─── Star snapshots for saved repos ────────────────────────
 async function snapshotSavedRepoStars() {
-  const d = getDB();
-  if (!d) return;
   try {
-    const saved = d.prepare('SELECT full_name FROM saved_repos').all();
+    const saved = await allQ('SELECT full_name FROM saved_repos');
     if (!saved.length) return;
     for (const { full_name } of saved) {
       try {
@@ -469,11 +387,11 @@ async function snapshotSavedRepoStars() {
         if (!res.ok) continue;
         const data = await res.json();
         const today = new Date().toISOString().slice(0, 10);
-        d.prepare(`
+        await runQ(`
           INSERT INTO star_snapshots (full_name, stars, created_at)
           VALUES (?, ?, ?)
           ON CONFLICT(full_name, created_at) DO UPDATE SET stars = excluded.stars
-        `).run(full_name, data.stargazers_count || 0, today);
+        `, [full_name, data.stargazers_count || 0, today]);
         await new Promise(r => setTimeout(r, 500));
       } catch (e) { /* skip */ }
     }
@@ -494,12 +412,10 @@ function getNodemailer() {
   }
 }
 
-function getTelegramConfig() {
-  const d = getDB();
-  if (!d) return null;
+async function getTelegramConfig() {
   try {
-    const bot = d.prepare("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'telegram_bot'").get();
-    const chat = d.prepare("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'telegram_chat'").get();
+    const bot = await getQ("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'telegram_bot'");
+    const chat = await getQ("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'telegram_chat'");
     if (bot && bot.gia_tri_khoa && chat && chat.gia_tri_khoa) {
       return { botToken: bot.gia_tri_khoa.trim(), chatId: chat.gia_tri_khoa.trim() };
     }
@@ -507,15 +423,13 @@ function getTelegramConfig() {
   return null;
 }
 
-function getEmailConfig() {
-  const d = getDB();
-  if (!d) return null;
+async function getEmailConfig() {
   try {
-    const host = d.prepare("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'smtp_host'").get();
-    const user = d.prepare("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'smtp_user'").get();
-    const pass = d.prepare("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'smtp_pass'").get();
-    const from = d.prepare("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'smtp_from'").get();
-    const to = d.prepare("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'smtp_to'").get();
+    const host = await getQ("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'smtp_host'");
+    const user = await getQ("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'smtp_user'");
+    const pass = await getQ("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'smtp_pass'");
+    const from = await getQ("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'smtp_from'");
+    const to = await getQ("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'smtp_to'");
     if (host && user && pass && to) {
       return {
         host: host.gia_tri_khoa.trim(),
@@ -541,7 +455,7 @@ function formatDigestText(repos) {
 }
 
 async function sendTelegramDigest(text) {
-  const cfg = getTelegramConfig();
+  const cfg = await getTelegramConfig();
   if (!cfg) return false;
   try {
     const url = `https://api.telegram.org/bot${cfg.botToken}/sendMessage`;
@@ -558,7 +472,7 @@ async function sendTelegramDigest(text) {
 }
 
 async function sendEmailDigest(repos) {
-  const cfg = getEmailConfig();
+  const cfg = await getEmailConfig();
   const nm = getNodemailer();
   if (!cfg || !nm) return false;
   try {
@@ -587,10 +501,8 @@ async function sendEmailDigest(repos) {
 
 async function sendDailyDigest() {
   console.log('[GitHub Scheduler] Sending daily digest...');
-  const d = getDB();
-  if (!d) return;
   try {
-    const cached = getCachedRepos('', 'daily');
+    const cached = await getCachedRepos('', 'daily');
     if (!cached || !cached.repos || !cached.repos.length) return;
     const text = formatDigestText(cached.repos);
     await sendTelegramDigest(text);
@@ -601,22 +513,19 @@ async function sendDailyDigest() {
   }
 }
 
-
 // --- Detect New Repos (compare with cache) ---
-function detectNewRepos(language, since, newRepos) {
+async function detectNewRepos(language, since, newRepos) {
   try {
-    const cached = getCachedRepos(language, since);
+    const cached = await getCachedRepos(language, since);
     if (!cached || !cached.repos) return;
     const oldNames = new Set(cached.repos.map(r => r.full_name));
     const newOnes = newRepos.filter(r => !oldNames.has(r.full_name));
     if (newOnes.length === 0) return;
     console.log('[GitHub Scheduler] Found ' + newOnes.length + ' new repos for ' + (language || 'all') + ' (' + since + ')');
-    const d = getDB();
-    if (!d) return;
-    const stmt = d.prepare('INSERT INTO trending_notifications (full_name, owner, name, description, language, stars, stars_gained, period, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const repo of newOnes) {
       try {
-        stmt.run(repo.full_name, repo.owner, repo.name, repo.description || '', repo.language || '', repo.stars || 0, repo.stars_gained || 0, repo.period || '', repo.url || '');
+        await runQ('INSERT INTO trending_notifications (full_name, owner, name, description, language, stars, stars_gained, period, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [repo.full_name, repo.owner, repo.name, repo.description || '', repo.language || '', repo.stars || 0, repo.stars_gained || 0, repo.period || '', repo.url || '']);
       } catch (e) { /* skip duplicate */ }
     }
   } catch (e) {
@@ -625,20 +534,16 @@ function detectNewRepos(language, since, newRepos) {
 }
 
 // --- Cleanup Old Notifications (keep last 100) ---
-function cleanupNotifications() {
+async function cleanupNotifications() {
   try {
-    const d = getDB();
-    if (!d) return;
-    d.prepare('DELETE FROM trending_notifications WHERE id NOT IN (SELECT id FROM trending_notifications ORDER BY created_at DESC LIMIT 100)').run();
+    await runQ('DELETE FROM trending_notifications WHERE id NOT IN (SELECT id FROM trending_notifications ORDER BY created_at DESC LIMIT 100)');
   } catch (e) { /* ignore */ }
 }
 
 // --- Load notifications from DB ---
-function loadNotificationsFromDB() {
+async function loadNotificationsFromDB() {
   try {
-    const d = getDB();
-    if (!d) return [];
-    return d.prepare('SELECT * FROM trending_notifications ORDER BY created_at DESC LIMIT 50').all();
+    return await allQ('SELECT * FROM trending_notifications ORDER BY created_at DESC LIMIT 50');
   } catch (e) { return []; }
 }
 
