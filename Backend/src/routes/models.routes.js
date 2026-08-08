@@ -8,34 +8,116 @@ const { execSync } = require('child_process');
 const OPENCODE_BIN_PATH = process.env.OPENCODE_BIN_PATH || (process.env.USERPROFILE ? require("path").join(process.env.USERPROFILE, ".opencode", "bin", "opencode.exe") : "");
 const IS_OPENCODE_AVAILABLE = fs.existsSync(OPENCODE_BIN_PATH);
 
+// Đồng bộ dữ liệu: xóa các provider đã loại bỏ khỏi hệ thống
+try {
+  db.run(`DELETE FROM khoa_api WHERE ten_nha_cung_cap IN ('bazaarlink', 'kiraai', 'ollama', 'freellmapi', 'tokenrouter')`);
+  db.run(`DELETE FROM model_scan_cache WHERE ma_nha_cung_cap IN ('bazaarlink', 'kiraai', 'ollama', 'freellmapi', 'tokenrouter')`);
+  db.run(`UPDATE ai_models SET kich_hoat = 0 WHERE ma_nha_cung_cap IN ('bazaarlink', 'kiraai', 'ollama', 'freellmapi', 'tokenrouter')`);
+  db.run(`UPDATE ai_providers SET kich_hoat = 0 WHERE ma_nha_cung_cap IN ('tokenrouter')`);
+
+  const defaultSeedModels = [
+    { id: 'gemini-1.5-flash', provider: 'gemini', name: 'Gemini 1.5 Flash', type: 'free' },
+    { id: 'gemini-2.0-flash-exp', provider: 'gemini', name: 'Gemini 2.0 Flash Exp', type: 'free' },
+    { id: 'gemini-1.5-pro', provider: 'gemini', name: 'Gemini 1.5 Pro', type: 'pro' },
+    { id: 'llama-3.3-70b-versatile', provider: 'groq', name: 'Llama 3.3 70B', type: 'pro' },
+    { id: 'mixtral-8x7b-32768', provider: 'groq', name: 'Mixtral 8x7B', type: 'free' },
+    { id: 'deepseek-chat', provider: 'deepseek', name: 'DeepSeek V3', type: 'pro' },
+    { id: 'deepseek-reasoner', provider: 'deepseek', name: 'DeepSeek R1', type: 'pro' },
+    { id: 'opencode/deepseek-v4-flash-free', provider: 'opencode', name: 'DeepSeek V4 Flash (Free)', type: 'free' },
+    { id: 'gpt-4o-mini', provider: 'openai', name: 'GPT-4o Mini', type: 'free' },
+    { id: 'gpt-4o', provider: 'openai', name: 'GPT-4o', type: 'pro' }
+  ];
+
+  for (const m of defaultSeedModels) {
+    db.run(
+      `INSERT INTO ai_models (ma_model, ma_nha_cung_cap, ten_hien_thi, loai, thu_tu_hien_thi, kich_hoat)
+       VALUES (?, ?, ?, ?, 0, 1)
+       ON CONFLICT(ma_model) DO UPDATE SET kich_hoat = 1, ma_nha_cung_cap = excluded.ma_nha_cung_cap`,
+      [m.id, m.provider, m.name, m.type]
+    );
+  }
+} catch(e) {}
+
 // ─── Public: lấy danh sách models đang hoạt động ─────────────
 // GET /api/models?provider=gemini
 router.get('/', (req, res) => {
   const provider = (req.query.provider || '').trim();
   let sql = `
-    SELECT m.ma_model, m.ma_nha_cung_cap, p.ten_hien_thi as provider_name,
+    SELECT m.ma_model, m.ma_nha_cung_cap, COALESCE(p.ten_hien_thi, m.ma_nha_cung_cap) as provider_name,
            m.ten_hien_thi, m.loai, m.thu_tu_hien_thi
     FROM ai_models m
-    JOIN ai_providers p ON m.ma_nha_cung_cap = p.ma_nha_cung_cap
-    WHERE m.kich_hoat = 1 AND p.kich_hoat = 1
+    LEFT JOIN ai_providers p ON LOWER(m.ma_nha_cung_cap) = LOWER(p.ma_nha_cung_cap)
+    WHERE m.kich_hoat = 1
   `;
   const params = [];
   if (provider) {
-    sql += ' AND m.ma_nha_cung_cap = ?';
+    sql += ' AND LOWER(m.ma_nha_cung_cap) = LOWER(?)';
     params.push(provider);
   }
   sql += ' ORDER BY m.thu_tu_hien_thi ASC, m.ten_hien_thi ASC';
 
   db.all(sql, params, (err, rows) => {
     if (err) return res.status(500).json({ success: false, error: err.message });
+
+    // Nếu CSDL ai_models rỗng → Fallback sang model_scan_cache hoặc danh sách mặc định uy tín
+    if (!rows || rows.length === 0) {
+      const cacheSql = provider
+        ? `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache WHERE trang_thai = 'working' AND LOWER(ma_nha_cung_cap) = LOWER(?)`
+        : `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache WHERE trang_thai = 'working'`;
+      const cacheParams = provider ? [provider] : [];
+
+      return db.all(cacheSql, cacheParams, (err2, cacheRows) => {
+        if (!err2 && cacheRows && cacheRows.length > 0) {
+          const map = new Map();
+          for (const r of cacheRows) {
+            const pKey = r.ma_nha_cung_cap.toLowerCase();
+            if (!map.has(pKey)) map.set(pKey, []);
+            map.get(pKey).push({
+              id: r.ma_model,
+              name: r.ma_model.includes('/') ? r.ma_model.split('/').pop() : r.ma_model,
+              type: r.ma_model.includes('pro') || r.ma_model.includes('gpt-4') ? 'pro' : 'free',
+              provider: pKey,
+              providerName: pKey.toUpperCase(),
+            });
+          }
+          return res.json({ success: true, models: Object.fromEntries(map) });
+        }
+
+        // Fallback mặc định khi chưa quét bất kỳ model nào
+        const DEFAULTS = {
+          gemini: [
+            { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', type: 'free', provider: 'gemini' },
+            { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', type: 'pro', provider: 'gemini' },
+            { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash Exp', type: 'free', provider: 'gemini' }
+          ],
+          groq: [
+            { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B', type: 'pro', provider: 'groq' },
+            { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B', type: 'free', provider: 'groq' }
+          ],
+          openai: [
+            { id: 'gpt-4o', name: 'GPT-4o', type: 'pro', provider: 'openai' },
+            { id: 'gpt-4o-mini', name: 'GPT-4o Mini', type: 'free', provider: 'openai' }
+          ],
+          deepseek: [
+            { id: 'deepseek-chat', name: 'DeepSeek V3', type: 'pro', provider: 'deepseek' },
+            { id: 'deepseek-reasoner', name: 'DeepSeek R1', type: 'pro', provider: 'deepseek' }
+          ]
+        };
+        const pKey = (provider || 'gemini').toLowerCase();
+        const resMap = DEFAULTS[pKey] ? { [pKey]: DEFAULTS[pKey] } : DEFAULTS;
+        return res.json({ success: true, models: resMap });
+      });
+    }
+
     const map = new Map();
     for (const r of rows) {
-      if (!map.has(r.ma_nha_cung_cap)) map.set(r.ma_nha_cung_cap, []);
-      map.get(r.ma_nha_cung_cap).push({
+      const pKey = r.ma_nha_cung_cap.toLowerCase();
+      if (!map.has(pKey)) map.set(pKey, []);
+      map.get(pKey).push({
         id: r.ma_model,
         name: r.ten_hien_thi,
         type: r.loai,
-        provider: r.ma_nha_cung_cap,
+        provider: pKey,
         providerName: r.provider_name,
       });
     }
@@ -53,9 +135,7 @@ router.get('/test-db-select', [authMiddleware, adminMiddleware], (req, res) => {
     const safeList = (rows || []).map(r => ({
       ma_khoa: r.ma_khoa,
       provider: r.ten_nha_cung_cap,
-      hasKey: !!r.gia_tri_khoa,
-      keyPreview: r.gia_tri_khoa ? (r.gia_tri_khoa.length > 8 ? r.gia_tri_khoa.substring(0, 4) + '...' + r.gia_tri_khoa.slice(-4) : '****') : 'none',
-      keyLength: r.gia_tri_khoa ? r.gia_tri_khoa.length : 0
+      hasKey: !!r.api_key_value
     }));
     res.json({
       success: true,
@@ -91,13 +171,7 @@ router.get('/providers', async (req, res) => {
       hasKey: !!r.api_key_value
     }));
 
-    let isOmniRouteActive = false;
-    try {
-      const check = await fetch('http://localhost:20128/v1/models', { signal: AbortSignal.timeout(1500) }).catch(() => null);
-      if (check && check.ok) isOmniRouteActive = true;
-    } catch(e) {}
-
-    res.json({ success: true, isOmniRouteActive, providers });
+    res.json({ success: true, providers });
   });
 });
 
@@ -129,6 +203,9 @@ router.put('/admin/providers/:providerId', [authMiddleware, adminMiddleware], (r
     function (err) {
       if (err) return res.status(500).json({ success: false, error: err.message });
       if (this.changes === 0) return res.status(404).json({ success: false, error: 'Không tìm thấy provider' });
+      if (typeof global !== 'undefined' && global.__modelScanComplete) {
+        global.__modelScanComplete({ provider: providerId, action: 'provider_updated' });
+      }
       res.json({ success: true, message: 'Đã cập nhật provider' });
     }
   );
@@ -173,6 +250,9 @@ router.post('/admin/models', [authMiddleware, adminMiddleware], (req, res) => {
     [ma_model, ma_nha_cung_cap, ten_hien_thi, loai || 'free', thu_tu_hien_thi || 0, kich_hoat ? 1 : 0],
     function (err) {
       if (err) return res.status(500).json({ success: false, error: err.message });
+      if (typeof global !== 'undefined' && global.__modelScanComplete) {
+        global.__modelScanComplete({ provider: ma_nha_cung_cap, action: 'model_updated' });
+      }
       res.json({ success: true, message: 'Đã lưu model' });
     }
   );
@@ -185,6 +265,9 @@ router.delete('/admin/models/:modelId', [authMiddleware, adminMiddleware], (req,
   db.run('DELETE FROM ai_models WHERE ma_model = ?', [modelId], function (err) {
     if (err) return res.status(500).json({ success: false, error: err.message });
     if (this.changes === 0) return res.status(404).json({ success: false, error: 'Không tìm thấy model' });
+    if (typeof global !== 'undefined' && global.__modelScanComplete) {
+      global.__modelScanComplete({ action: 'model_deleted', modelId });
+    }
     res.json({ success: true, message: 'Đã xóa model' });
   });
 });
@@ -247,21 +330,6 @@ async function fetchModelsFromProvider(provider, apiKey, baseUrl) {
     if (data.data && Array.isArray(data.data)) modelsList = data.data.map(m => m.id);
     else if (data.models && Array.isArray(data.models)) modelsList = data.models.map(m => m.id || m.name);
     else if (data.error) return { success: false, error: 'Claude: ' + (data.error.message || JSON.stringify(data.error)) };
-  } else if (provider === 'kiraai') {
-    const cleanedBase = (baseUrl || 'https://kiraai.vn/api/v1').replace(/\/+$/, '');
-    const endpoint = cleanedBase.endsWith('/models') ? cleanedBase : cleanedBase + '/models';
-    const resp = await fetch(endpoint, { headers: { 'Authorization': 'Bearer ' + apiKey } });
-    const data = await resp.json();
-    if (data.data && Array.isArray(data.data)) modelsList = data.data.map(m => m.id);
-    else if (data.models && Array.isArray(data.models)) modelsList = data.models.map(m => m.id || m.name);
-    else if (data.error) return { success: false, error: 'KiraAI: ' + (data.error.message || JSON.stringify(data.error)) };
-  } else if (provider === 'bazaarlink') {
-    const cleanedBase = (baseUrl || 'https://api.bazaarlink.ai/v1').replace(/\/+$/, '');
-    const endpoint = cleanedBase.endsWith('/models') ? cleanedBase : cleanedBase + '/models';
-    const resp = await fetch(endpoint, { headers: { 'Authorization': 'Bearer ' + apiKey } });
-    const data = await resp.json();
-    if (data.data && Array.isArray(data.data)) modelsList = data.data.map(m => m.id);
-    else if (data.error) return { success: false, error: 'BazaarLink: ' + (data.error.message || JSON.stringify(data.error)) };
   } else if (provider === 'github') {
     const resp = await fetch('https://models.github.ai/inference/models', { headers: { 'Authorization': 'Bearer ' + apiKey } });
     const data = await resp.json();
@@ -269,11 +337,6 @@ async function fetchModelsFromProvider(provider, apiKey, baseUrl) {
     else if (data.data && Array.isArray(data.data)) modelsList = data.data.map(m => m.id || m.name);
     else if (data.error) return { success: false, error: 'GitHub Models: ' + (data.error.message || JSON.stringify(data.error)) };
     else modelsList = ['gpt-4o', 'gpt-4o-mini', 'o1-mini', 'DeepSeek-R1', 'DeepSeek-V3', 'meta-llama-3.1-405b-instruct', 'Phi-3-medium-instruct'];
-  } else if (provider === 'ollama') {
-    const endpoint = (baseUrl || 'http://localhost:11434').replace(/\/+$/, '') + '/api/tags';
-    const resp = await fetch(endpoint);
-    const data = await resp.json();
-    if (data.models && Array.isArray(data.models)) modelsList = data.models.map(m => m.name);
   } else if (provider === 'opencode') {
     try {
       if (!IS_OPENCODE_AVAILABLE) throw new Error('OpenCode binary not found.');
@@ -284,15 +347,15 @@ async function fetchModelsFromProvider(provider, apiKey, baseUrl) {
       modelsList = ['opencode/deepseek-v4-flash-free', 'opencode/qwen-2.5-coder-32b-free', 'opencode/llama-3.3-70b-free'];
     }
   } else {
-    // freellmapi, custom
-    const cleanedBase = (baseUrl || 'http://localhost:8080/v1').replace(/\/+$/, '');
+    // custom
+    const cleanedBase = (baseUrl || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
     const endpoint = cleanedBase.endsWith('/models') ? cleanedBase : cleanedBase + '/models';
     const headers = apiKey ? { 'Authorization': 'Bearer ' + apiKey } : {};
     const resp = await fetch(endpoint, { headers });
     const data = await resp.json();
     if (data.data && Array.isArray(data.data)) modelsList = data.data.map(m => m.id);
     else if (Array.isArray(data)) modelsList = data.map(m => m.id || m.name || m);
-    else if (data.error) return { success: false, error: (provider === 'custom' ? 'Custom' : 'FreeLLMAPI') + ': ' + (data.error.message || JSON.stringify(data.error)) };
+    else if (data.error) return { success: false, error: (provider === 'custom' ? 'Custom' : provider) + ': ' + (data.error.message || JSON.stringify(data.error)) };
   }
 
   return { success: true, models: modelsList };
@@ -393,11 +456,11 @@ async function aiAnalyzeProviderWithGroq(providerInput) {
     'gh': { providerId: 'github', providerName: 'GitHub Models', modelsEndpoint: 'https://models.github.ai/inference/models' },
 
     'openrouter': { providerId: 'custom', providerName: 'OpenRouter Gateway', modelsEndpoint: 'https://openrouter.ai/api/v1/models' },
-    'or': { providerId: 'custom', providerName: 'OpenRouter Gateway', modelsEndpoint: 'https://openrouter.ai/api/v1/models' },
-
-    'omniroute': { providerId: 'omniroute', providerName: 'OmniRoute Gateway', modelsEndpoint: 'http://localhost:20128/v1/models' },
-    'ollama': { providerId: 'ollama', providerName: 'Ollama Local AI', modelsEndpoint: 'http://localhost:11434/api/tags' },
-    'opencode': { providerId: 'opencode', providerName: 'OpenCode Agent Engine', modelsEndpoint: 'opencode://models' }
+    'opencode': { providerId: 'opencode', providerName: 'OpenCode Agent Engine', modelsEndpoint: 'opencode://models' },
+    'mistral': { providerId: 'mistral', providerName: 'Mistral AI', modelsEndpoint: 'https://api.mistral.ai/v1/models' },
+    'cerebras': { providerId: 'cerebras', providerName: 'Cerebras', modelsEndpoint: 'https://api.cerebras.ai/v1/models' },
+    'cohere': { providerId: 'cohere', providerName: 'Cohere AI', modelsEndpoint: 'https://api.cohere.ai/v2/models' },
+    'nvidia': { providerId: 'nvidia', providerName: 'Nvidia NIM', modelsEndpoint: 'https://integrate.api.nvidia.com/v1/models' }
   };
 
   if (FAST_MAP[cleanInput]) {
@@ -454,9 +517,12 @@ async function verifyModelHealth(provider, apiKey, baseUrl, modelId) {
   const cleanKey = (apiKey || '').trim();
   const cleanBase = (baseUrl || '').replace(/\/+$/, '');
 
+
+
   try {
     if (provider === 'gemini') {
-      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelId}?key=${cleanKey}`, { signal: AbortSignal.timeout(6000) });
+      const cleanModelId = modelId.replace(/^models\//, '');
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${cleanModelId}?key=${cleanKey}`, { signal: AbortSignal.timeout(12000) });
       const latency = Date.now() - startTime;
       if (resp.ok) {
         return { id: modelId, name: modelId, provider, status: 'working', latency_ms: latency, message: 'Hoạt động tốt' };
@@ -466,22 +532,14 @@ async function verifyModelHealth(provider, apiKey, baseUrl, modelId) {
       }
     }
 
-    if (['openai', 'groq', 'grok', 'deepseek', 'github', 'custom', 'freellmapi', 'kiraai', 'bazaarlink'].includes(provider)) {
+    if (['openai', 'groq', 'grok', 'deepseek', 'github', 'custom'].includes(provider)) {
       let endpoint = 'https://api.openai.com/v1/chat/completions';
       if (provider === 'groq') endpoint = 'https://api.groq.com/openai/v1/chat/completions';
       if (provider === 'grok') endpoint = 'https://api.x.ai/v1/chat/completions';
       if (provider === 'deepseek') endpoint = 'https://api.deepseek.com/chat/completions';
       if (provider === 'github') endpoint = 'https://models.github.ai/inference/chat/completions';
-      if (provider === 'kiraai') {
-        const base = cleanBase || 'https://kiraai.vn/api/v1';
-        endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
-      }
-      if (provider === 'bazaarlink') {
-        const base = cleanBase || 'https://api.bazaarlink.ai/v1';
-        endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
-      }
-      if (provider === 'freellmapi' || provider === 'custom') {
-        const base = cleanBase || (provider === 'custom' ? 'https://openrouter.ai/api/v1' : 'http://localhost:8080/v1');
+      if (provider === 'custom') {
+        const base = cleanBase || 'https://openrouter.ai/api/v1';
         endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
       }
 
@@ -489,14 +547,15 @@ async function verifyModelHealth(provider, apiKey, baseUrl, modelId) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(cleanKey ? { 'Authorization': 'Bearer ' + cleanKey } : {}) },
         body: JSON.stringify({ model: modelId, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
-        signal: AbortSignal.timeout(7000)
+        signal: AbortSignal.timeout(12000)
       });
       const latency = Date.now() - startTime;
       const data = await resp.json().catch(() => ({}));
       if (resp.ok && (data.choices || data.id)) {
         return { id: modelId, name: modelId, provider, status: 'working', latency_ms: latency, message: 'Hoạt động tốt' };
       } else {
-        return { id: modelId, name: modelId, provider, status: 'failed', latency_ms: latency, error: data.error?.message || `HTTP ${resp.status}` };
+        const errMsg = data.error?.message || data.detail || data.message || (typeof data === 'string' ? data : `HTTP ${resp.status}`);
+        return { id: modelId, name: modelId, provider, status: 'failed', latency_ms: latency, error: errMsg };
       }
     }
 
@@ -557,7 +616,53 @@ router.post('/admin/models/verify-and-scan', [authMiddleware, adminMiddleware], 
       verifiedResults.push(...chunkResults);
     }
 
-    const workingCount = verifiedResults.filter(m => m.status === 'working').length;
+    const workingResults = verifiedResults.filter(m => m.status === 'working');
+    const workingCount = workingResults.length;
+
+    // TỰ ĐỘNG LƯU VÀO CSDL VÀ KÍCH HOẠT TRÊN TRANG CHỦ
+    if (workingCount > 0) {
+      if (api_key && api_key.trim()) {
+        const keyId = 'k_' + resolvedProvider;
+        db.run(
+          `INSERT INTO khoa_api (ma_khoa, ma_nguoi_dung, ten_nha_cung_cap, gia_tri_khoa)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(ma_khoa) DO UPDATE SET gia_tri_khoa = excluded.gia_tri_khoa`,
+          [keyId, req.user.id, resolvedProvider, api_key.trim()]
+        );
+      }
+
+      for (const m of workingResults) {
+        const modelId = m.id;
+        const displayName = modelId.includes('/') ? modelId.split('/').pop() : modelId;
+        const type = (modelId.includes('pro') || modelId.includes('gpt-4') || modelId.includes('sonnet')) ? 'pro' : 'free';
+
+        db.run(
+          `INSERT INTO ai_models (ma_model, ma_nha_cung_cap, ten_hien_thi, loai, thu_tu_hien_thi, kich_hoat)
+           VALUES (?, ?, ?, ?, 0, 1)
+           ON CONFLICT(ma_model) DO UPDATE SET
+             ma_nha_cung_cap = excluded.ma_nha_cung_cap,
+             ten_hien_thi = excluded.ten_hien_thi,
+             loai = excluded.loai,
+             kich_hoat = 1,
+             ngay_cap_nhat = CURRENT_TIMESTAMP`,
+          [modelId, resolvedProvider, displayName, type]
+        );
+
+        db.run(
+          `INSERT INTO model_scan_cache (ma_model, ma_nha_cung_cap, trang_thai, do_tre_ms, loi_chi_tiet, thoi_gian_quet)
+           VALUES (?, ?, 'working', ?, NULL, datetime('now'))
+           ON CONFLICT(ma_model, ma_nha_cung_cap) DO UPDATE SET
+             trang_thai = 'working', do_tre_ms = excluded.do_tre_ms, loi_chi_tiet = NULL, thoi_gian_quet = datetime('now')`,
+          [modelId, resolvedProvider, m.latency_ms || 0]
+        );
+      }
+
+      // Phát thông báo SSE Real-time cập nhật Trang Chủ lập tức không cần F5
+      if (typeof global !== 'undefined' && global.__modelScanComplete) {
+        global.__modelScanComplete({ working: workingCount, total: verifiedResults.length, provider: resolvedProvider });
+      }
+    }
+
     res.json({
       success: true,
       analysis: aiAnalysis,
@@ -619,6 +724,9 @@ router.post('/admin/models/publish-active', [authMiddleware, adminMiddleware], a
         savedCount++;
       }
 
+      if (typeof global !== 'undefined' && global.__modelScanComplete) {
+        global.__modelScanComplete({ provider, publishedCount: savedCount, action: 'published' });
+      }
       res.json({
         success: true,
         provider,
@@ -628,6 +736,127 @@ router.post('/admin/models/publish-active', [authMiddleware, adminMiddleware], a
     });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Lỗi cập nhật trang chủ: ' + err.message });
+  }
+});
+
+
+// ─── Admin: Quét tất cả providers (scan-all) ────────────────────
+// POST /api/admin/models/scan-all
+router.post('/admin/models/scan-all', [authMiddleware, adminMiddleware], async (req, res) => {
+  try {
+    const { scanAllProviders } = require('../model-scanner.scheduler');
+    const summary = await scanAllProviders();
+    const totalWorking = summary.reduce((acc, s) => acc + (s.working || 0), 0);
+    const totalModels = summary.reduce((acc, s) => acc + (s.total || 0), 0);
+    const scannedProviders = summary.filter(s => s.success !== false || !s.skipped);
+    res.json({
+      success: true,
+      message: `Quét hoàn tất! ${totalWorking}/${totalModels} model hoạt động từ ${scannedProviders.length} providers.`,
+      summary
+    });
+  } catch(e) {
+    res.status(500).json({ success: false, error: 'Lỗi quét: ' + e.message });
+  }
+});
+
+// ─── Admin: Xóa sạch toàn bộ model chèn cứng và cache để thiết lập lại ──────
+// POST /api/admin/models/clear-and-reset
+router.post('/admin/models/clear-and-reset', [authMiddleware, adminMiddleware], (req, res) => {
+  try {
+    // Dùng better-sqlite3 (sync) thay vì sqlite3 adapter (async) để đảm bảo xóa xong mới trả response
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    const d = new Database(path.join(__dirname, '..', '..', '..', 'Database', 'tro_ly_ai.db'));
+    d.exec("DELETE FROM model_scan_cache; DELETE FROM provider_scan_log;");
+    d.prepare("UPDATE ai_models SET kich_hoat = 0 WHERE ma_model != 'gemini-3.6-flash'").run();
+    d.close();
+    if (typeof global !== 'undefined' && global.__modelScanComplete) {
+      global.__modelScanComplete({ action: 'reset' });
+    }
+    res.json({ success: true, message: '🧹 Đã xóa sạch toàn bộ model cũ và lịch sử cache! Bấm Quét để kiểm tra lại.' });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ─── Admin: Quét một provider đơn lẻ ─────────────────────────
+// POST /api/admin/models/scan-provider
+router.post('/admin/models/scan-provider', [authMiddleware, adminMiddleware], async (req, res) => {
+  const { provider } = req.body;
+  if (!provider) return res.status(400).json({ success: false, error: 'Thiếu provider' });
+  try {
+    const { scanProvider } = require('../model-scanner.scheduler');
+    const result = await scanProvider(provider);
+    // Push SSE event to connected frontends
+    if (typeof global !== 'undefined' && global.__modelScanComplete) {
+      global.__modelScanComplete({ working: result.working || 0, total: result.total || 0, providers: 1, provider });
+    }
+    res.json(result);
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ─── Admin: Lấy kết quả scan cache từ CSDL ────────────────────
+// GET /api/admin/models/scan-cache?provider=gemini
+router.get('/admin/models/scan-cache', [authMiddleware, adminMiddleware], (req, res) => {
+  const { provider } = req.query;
+  const Database = require('better-sqlite3');
+  const path = require('path');
+  const dbPath = path.join(__dirname, '..', '..', '..', 'Database', 'tro_ly_ai.db');
+  
+  try {
+    const d = new Database(dbPath);
+    
+    // Tạo bảng nếu chưa có
+    d.exec(`
+      CREATE TABLE IF NOT EXISTS model_scan_cache (
+        ma_model TEXT NOT NULL,
+        ma_nha_cung_cap TEXT NOT NULL,
+        trang_thai TEXT NOT NULL,
+        do_tre_ms INTEGER DEFAULT 0,
+        loi_chi_tiet TEXT,
+        thoi_gian_quet TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (ma_model, ma_nha_cung_cap)
+      );
+      CREATE TABLE IF NOT EXISTS provider_scan_log (
+        ma_nha_cung_cap TEXT PRIMARY KEY,
+        lan_quet_cuoi TEXT DEFAULT (datetime('now')),
+        tong_model INTEGER DEFAULT 0,
+        model_hoat_dong INTEGER DEFAULT 0
+      );
+    `);
+
+    let models;
+    let providers;
+    
+    if (provider) {
+      models = d.prepare(`
+        SELECT ma_model, ma_nha_cung_cap, trang_thai, do_tre_ms, loi_chi_tiet, thoi_gian_quet
+        FROM model_scan_cache WHERE ma_nha_cung_cap = ? ORDER BY trang_thai DESC, do_tre_ms ASC
+      `).all(provider);
+    } else {
+      models = d.prepare(`
+        SELECT ma_model, ma_nha_cung_cap, trang_thai, do_tre_ms, loi_chi_tiet, thoi_gian_quet
+        FROM model_scan_cache ORDER BY ma_nha_cung_cap, trang_thai DESC, do_tre_ms ASC
+      `).all();
+    }
+
+    providers = d.prepare(`SELECT * FROM provider_scan_log`).all();
+
+    // Group by provider
+    const grouped = {};
+    for (const m of models) {
+      if (!grouped[m.ma_nha_cung_cap]) {
+        grouped[m.ma_nha_cung_cap] = { working: [], failed: [] };
+      }
+      if (m.trang_thai === 'working') grouped[m.ma_nha_cung_cap].working.push(m);
+      else grouped[m.ma_nha_cung_cap].failed.push(m);
+    }
+
+    res.json({ success: true, grouped, providers, total: models.length });
+  } catch(e) {
+    res.json({ success: true, grouped: {}, providers: [], total: 0, note: 'No scan data yet' });
   }
 });
 

@@ -6,6 +6,19 @@ const { authMiddleware, adminMiddleware } = require('../middleware/auth.middlewa
 
 const rootDir = path.resolve(__dirname, '..', '..', '..');
 
+// File nhạy cảm — user thường KHÔNG được đọc (chống lộ API key trong .env, DB, log...)
+const SENSITIVE_FILE_PATTERNS = [
+  /\.env(\b|$)/i,        // .env, .env.production...
+  /\.db(-wal|-shm)?$/i,  // SQLite + WAL/SHM
+  /\.sqlite/i,
+  /\.log$/i,
+  /DANH_SACH_API_KEY/i
+];
+function isSensitivePath(relPath) {
+  const normalized = String(relPath || '').replace(/\\/g, '/');
+  return SENSITIVE_FILE_PATTERNS.some(re => re.test(normalized));
+}
+
 function resolveWorkspacePath(relativePath) {
   if (typeof relativePath !== 'string' || !relativePath.trim()) {
     throw new Error('Missing file path');
@@ -41,6 +54,7 @@ router.get('/files', authMiddleware, (req, res) => {
           children: scanDir(fullPath, itemRelPath, depth + 1)
         });
       } else {
+        if (isSensitivePath(itemRelPath)) continue;
         result.push({
           name: item.name,
           path: itemRelPath,
@@ -77,6 +91,7 @@ router.get('/file-content', authMiddleware, (req, res) => {
   const rootDir = path.join(__dirname, '..', '..', '..');
   const fullPath = safePath(rootDir, relPath);
   if (!fullPath) return res.status(403).json({ error: 'Path không hợp lệ (path traversal detected)' });
+  if (isSensitivePath(relPath)) return res.status(403).json({ error: 'Không cho phép đọc file nhạy cảm (.env, db, log...).' });
 
   try {
     const content = fs.readFileSync(fullPath, 'utf-8');

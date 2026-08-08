@@ -41,6 +41,11 @@ found_step.json
 tmp_*.js
 refactor*.cjs
 _debug_archive/
+scratch/
+scratch_*.js
+Backend/temp/
+Backend/scan_results/
+screen_*.png
 
 
 # SQLite WAL/SHM temp

@@ -40,7 +40,7 @@ function seedSkills() {
     ["s12", "computer-vision-opencv", "Thị Giác Máy Tính", "Xử lý ảnh/video OpenCV, PyTorch.", "kich_hoat"],
     ["s13", "free-llm-apis", "API LLM Miễn Phí", "Google, Groq, GitHub, NVIDIA, OpenRouter APIs.", "kich_hoat"],
     ["s14", "llava", "LLaVA Vision AI", "Mô hình đa phương thức phân tích hình ảnh.", "kich_hoat"],
-    ["s15", "omniroute", "AI Gateway", "Cổng kết nối đa provider AI, auto-fallback.", "kich_hoat"],
+    ["s15", "tokenrouter", "TokenRouter", "API Gateway 300+ provider AI, auto-fallback.", "kich_hoat"],
     ["s16", "prompt-jailbreak", "Prompt Jailbreak", "Kỹ thuật AI prompt engineering nâng cao.", "kich_hoat"],
     ["s17", "prompt-jailbreak-universal", "Prompt Jailbreak Universal", "Prompt jailbreak đa nền tảng LLM.", "kich_hoat"],
     

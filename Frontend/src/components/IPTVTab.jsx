@@ -22,23 +22,33 @@ const IPTV_CATEGORIES = [
 
 const POPULAR_COUNTRIES = ['VN', 'US', 'GB', 'KR', 'JP', 'CN', 'TH', 'FR', 'DE', 'IN', 'RU', 'BR', 'AU', 'CA', 'HK', 'TW'];
 
-const getFlagUrl = (code) => {
+const codeToFlagEmoji = (code) => {
+  if (!code || code.length !== 2) return '🌍';
+  const upper = code.toUpperCase();
+  return String.fromCodePoint(
+    0x1F1E6 + upper.charCodeAt(0) - 65,
+    0x1F1E6 + upper.charCodeAt(1) - 65
+  );
+};
+
+const codeToTwemojiUrl = (code) => {
   if (!code || code.length !== 2) return null;
-  return `https://flagcdn.com/24x18/${code.toLowerCase()}.png`;
+  const c = code.toUpperCase();
+  const cp1 = (0x1F1E6 + c.charCodeAt(0) - 65).toString(16);
+  const cp2 = (0x1F1E6 + c.charCodeAt(1) - 65).toString(16);
+  return `https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/svg/${cp1}-${cp2}.svg`;
 };
 
 const FlagImg = ({ code, size = 18, className = '' }) => {
-  const url = getFlagUrl(code);
-  if (!url) return <span className={className}>🌍</span>;
+  const url = codeToTwemojiUrl(code);
+  if (!url) return <span className={`inline-block shrink-0 ${className}`} style={{ fontSize: size }}>🌍</span>;
   return (
     <img
       src={url}
       alt={code}
-      width={size}
-      height={Math.round(size * 0.75)}
       className={`inline-block shrink-0 ${className}`}
-      style={{ imageRendering: 'auto' }}
-      onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'inline'); }}
+      style={{ width: size, height: size }}
+      onError={e => { e.target.style.display = 'none'; }}
     />
   );
 };
@@ -64,19 +74,25 @@ export default function IPTVTab({
   const [subtitleText, setSubtitleText] = useState('');
   const [subtitleInterim, setSubtitleInterim] = useState('');
   const [subtitleStatus, setSubtitleStatus] = useState('idle'); // idle | listening | error | unsupported
+  const [subtitleError, setSubtitleError] = useState(''); // Lỗi backend (CHƯA_CÓ_KEY/401/500...) hiện rõ cho user
   const mediaRecorderRef = useRef(null);
   const audioStreamRef = useRef(null);
   const sendingRef = useRef(false);
 
   const iptvSubtitleOnRef = useRef(iptvSubtitleOn);
 
-  // Filtered countries
+  // Danh sách quốc gia — gộp 1: các nước phổ biến ghim đầu, còn lại theo sau (khi không tìm kiếm)
   const filteredCountries = useMemo(() => {
-    if (!countrySearch) return ALL_IPTV_COUNTRIES;
-    const q = countrySearch.toLowerCase().trim();
-    return ALL_IPTV_COUNTRIES.filter(c =>
-      c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q)
-    );
+    if (countrySearch) {
+      const q = countrySearch.toLowerCase().trim();
+      return ALL_IPTV_COUNTRIES.filter(c =>
+        c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q)
+      );
+    }
+    const popular = POPULAR_COUNTRIES.map(code => ALL_IPTV_COUNTRIES.find(c => c.code === code)).filter(Boolean);
+    const popularCodes = new Set(popular.map(c => c.code));
+    const rest = ALL_IPTV_COUNTRIES.filter(c => !popularCodes.has(c.code));
+    return [...popular, ...rest];
   }, [countrySearch]);
 
   // Sync ref with state
@@ -99,12 +115,18 @@ export default function IPTVTab({
       setSubtitleText('');
       setSubtitleInterim('');
       setSubtitleStatus('idle');
+      setSubtitleError('');
       return;
     }
 
     // Lấy audio trực tiếp từ video element (không cần mic, nghe tiếng đang phát)
     const video = iptvVideoRef?.current;
-    if (!video) return;
+    if (!video) {
+      // Kênh YouTube (dùng iframe) hoặc video chưa mount → không lấy được audio
+      setSubtitleStatus('unsupported');
+      setSubtitleError('Kênh YouTube không hỗ trợ phụ đề AI (video không cho lấy audio).');
+      return;
+    }
 
     let cancelled = false;
     let stream = null;
@@ -141,24 +163,43 @@ export default function IPTVTab({
             headers: { 'Authorization': `Bearer ${localStorage.getItem('rexi_token') || ''}` },
             body: formData,
             credentials: 'include',
+            signal: AbortSignal.timeout(20000), // timeout 20s — tránh sendingRef kẹt true khi request treo
           })
-            .then(r => r.json())
-            .then(data => {
-              sendingRef.current = false;
-              if (data?.success && data.text) {
-                setSubtitleText(prev => {
-                  const newText = (prev + ' ' + data.text).trim();
-                  return newText.length > 300 ? data.text.trim() : newText.slice(-300);
-                });
+            .then(async r => {
+              const data = await r.json().catch(() => null);
+              if (!r.ok) {
+                // Backend trả lỗi (CHƯA_CÓ_KEY / 401 / 500...) → hiện thông báo rõ ràng thay vì im lặng
+                const msg = data?.message || data?.error || `Lỗi server (HTTP ${r.status})`;
+                setSubtitleStatus('error');
+                setSubtitleError(msg);
+                return;
+              }
+              if (data?.success) {
+                if (data.text) {
+                  setSubtitleText(prev => {
+                    const newText = (prev + ' ' + data.text).trim();
+                    return newText.length > 300 ? data.text.trim() : newText.slice(-300);
+                  });
+                }
+                // Dịch thành công (kể cả chunk im lặng) → báo đang nghe bình thường, xoá lỗi cũ
+                setSubtitleStatus('listening');
+                setSubtitleError('');
               }
             })
             .catch(err => {
-              sendingRef.current = false;
+              setSubtitleStatus('error');
+              setSubtitleError(err?.name === 'TimeoutError'
+                ? 'Yêu cầu phụ đề quá hạn (20s). Tự thử lại giây sau.'
+                : 'Không kết nối được server. Kiểm tra backend đang chạy.');
               console.warn('[Caption] fetch error:', err);
-            });
+            })
+            .finally(() => { sendingRef.current = false; });
         };
 
-        recorder.onerror = () => setSubtitleStatus('error');
+        recorder.onerror = () => {
+          setSubtitleStatus('error');
+          setSubtitleError('Lỗi ghi âm từ video. Thử tắt/bật lại phụ đề.');
+        };
         recorder.onstop = () => {
           if (cancelled) return;
           if (iptvSubtitleOnRef.current) {
@@ -171,6 +212,7 @@ export default function IPTVTab({
       } catch (e) {
         console.error('[Caption] Failed to start:', e);
         setSubtitleStatus('error');
+        setSubtitleError('Không lấy được âm thanh từ video (có thể do CORS/cross-origin).');
       }
     };
 
@@ -234,7 +276,7 @@ export default function IPTVTab({
             <button onClick={() => { setIptvTab?.('category'); setIptvSearch?.(''); fetchIPTV?.(iptvCategory); }} className={`flex-1 py-1 rounded text-[10px] font-medium transition-all ${iptvTab === 'category' ? 'bg-rose-500/20 text-rose-400' : 'text-slate-500 hover:text-white'}`}>
               <Globe size={10} className="inline mr-1" />Thể Loại
             </button>
-            <button onClick={() => { setIptvTab?.('country'); setIptvSearch?.(''); fetchIPTV?.(iptvCountry); }} className={`flex-1 py-1 rounded text-[10px] font-medium transition-all ${iptvTab === 'country' ? 'bg-rose-500/20 text-rose-400' : 'text-slate-500 hover:text-white'}`}>
+            <button onClick={() => { setIptvTab?.('country'); setIptvSearch?.(''); fetchIPTV?.(null, iptvCountry); }} className={`flex-1 py-1 rounded text-[10px] font-medium transition-all ${iptvTab === 'country' ? 'bg-rose-500/20 text-rose-400' : 'text-slate-500 hover:text-white'}`}>
               🌍 Quốc Gia
             </button>
           </div>
@@ -269,28 +311,8 @@ export default function IPTVTab({
                   className="w-full pl-6 pr-2 py-1 bg-[#1a1b24] border border-white/5 rounded text-[10px] text-white placeholder-slate-600 outline-none focus:border-rose-500/30"
                 />
               </div>
-              {/* Popular quick picks */}
-              <div className="flex flex-wrap gap-1 mt-1.5">
-                {POPULAR_COUNTRIES.map(code => {
-                  const c = ALL_IPTV_COUNTRIES.find(x => x.code === code);
-                  if (!c) return null;
-                  return (
-                    <button
-                      key={code}
-                      onClick={() => { setIptvCountry?.(code); setCountrySearch(''); fetchIPTV?.(null, code); }}
-                      className={`px-1.5 py-0.5 rounded text-[9px] font-medium transition-all flex items-center gap-1 ${
-                        iptvCountry === code ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'text-slate-400 hover:text-white bg-white/5'
-                      }`}
-                      title={c.name}
-                    >
-                      <FlagImg code={code} size={14} />
-                      <span>{code}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              {/* Country list */}
-              <div className="mt-1 max-h-[200px] overflow-y-auto space-y-0.5 scrollbar-thin">
+              {/* Country list — gộp 1 danh sách duy nhất (kèm cờ phổ biến nổi bật ở đầu) */}
+              <div className="mt-1 max-h-[260px] overflow-y-auto space-y-0.5 scrollbar-thin">
                 {/* Reset / All button */}
                 <button
                   onClick={() => { setIptvCountry?.(null); setCountrySearch(''); fetchIPTV?.(iptvCategory || 'news'); }}
@@ -437,22 +459,24 @@ export default function IPTVTab({
           {/* Subtitle status indicator */}
           {iptvSubtitleOn && (
             <div className="absolute top-3 left-3 z-20">
-              <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[9px] font-medium backdrop-blur-sm ${
+              <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[9px] font-medium backdrop-blur-sm max-w-[280px] ${
                 subtitleStatus === 'listening' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
                 subtitleStatus === 'error' ? 'bg-red-500/20 text-red-300 border border-red-500/30' :
                 subtitleStatus === 'unsupported' ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30' :
                 'bg-white/10 text-white/50 border border-white/10'
               }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                   subtitleStatus === 'listening' ? 'bg-emerald-400 animate-pulse' :
                   subtitleStatus === 'error' ? 'bg-red-400' :
                   subtitleStatus === 'unsupported' ? 'bg-yellow-400' :
                   'bg-white/30'
                 }`}></span>
-                {subtitleStatus === 'listening' ? 'Đang nghe...' :
-                 subtitleStatus === 'error' ? 'Lỗi microphone' :
-                 subtitleStatus === 'unsupported' ? 'Trình duyệt không hỗ trợ' :
-                 'Đang khởi động...'}
+                <span className="truncate" title={subtitleError || undefined}>
+                  {subtitleStatus === 'listening' ? 'Đang nghe...' :
+                   subtitleStatus === 'error' ? (subtitleError || 'Lỗi microphone') :
+                   subtitleStatus === 'unsupported' ? (subtitleError || 'Trình duyệt không hỗ trợ') :
+                   'Đang khởi động...'}
+                </span>
               </div>
             </div>
           )}

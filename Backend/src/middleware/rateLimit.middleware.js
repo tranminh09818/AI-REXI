@@ -28,7 +28,8 @@ function rateLimitMiddleware(req, res, next) {
     }
   }
 
-  const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  // FIX SECURITY: chỉ tin req.ip từ socket — không đọc X-Forwarded-For client tự đặt (chống bypass rate limit)
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
 
   if (!requestCounts.has(ip)) {

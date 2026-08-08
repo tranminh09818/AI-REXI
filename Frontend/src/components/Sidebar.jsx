@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
    Menu, Plus, MessageSquare, Code, Folder, Tv, Monitor,
    Layers, Zap, Search, Trash2, ChevronDown, FolderOpen,
-   User, Settings, LogOut, Headphones, Shield, Bot, Globe
+   User, Settings, LogOut, Headphones, Shield, Bot, Globe, BookOpen
   } from 'lucide-react';
 
 const RexiLogo = ({ className = "w-8 h-8" }) => (
@@ -16,7 +16,7 @@ export default function Sidebar({
   activeConvId, setActiveConvId,
   handleNewConversation, handleDeleteConversation,
   filesDrawerOpen, setFilesDrawerOpen, renderTree, fileTree,
-   setSkillsOpen, setSuperToolsOpen,
+   setSkillsOpen, setSuperToolsOpen, setHelpOpen,
   currentUser, setCurrentUser, setAuthToken, setAuthModalOpen, setSettingsOpen, setAdminOpen,
   apiFetch, API_BASE, showToast, setConversations
 }) {
@@ -43,11 +43,10 @@ export default function Sidebar({
   const handleContactAdmin = async () => {
     if (!currentUser) { setAuthModalOpen(true); return; }
     try {
-      const res = await apiFetch(`${API_BASE}/chat/conversations`, {
+      const data = await apiFetch('/chat/conversations', {
         method: 'POST',
         body: JSON.stringify({ tieu_de: '[Admin] Hỗ trợ & Phản hồi' })
       });
-      const data = await res.json();
       if (data.ma_hoi_thoai) {
         setConversations(prev => [data, ...prev]);
         setActiveConvId(data.ma_hoi_thoai);
@@ -115,7 +114,7 @@ export default function Sidebar({
 
 
       {/* Skills & Super Tools Buttons */}
-      <div className="grid grid-cols-2 gap-2 px-3 mt-2">
+      <div className="grid grid-cols-3 gap-2 px-3 mt-2">
         <button
           onClick={() => setSkillsOpen(true)}
           className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-purple-900/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-medium transition-all"
@@ -127,6 +126,12 @@ export default function Sidebar({
           className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-amber-900/30 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-medium transition-all"
         >
           <Zap size={14} /> Super Tools
+        </button>
+        <button
+          onClick={() => setHelpOpen(true)}
+          className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-sky-900/30 border border-sky-500/30 text-sky-300 hover:text-white text-xs font-medium transition-all"
+        >
+          <BookOpen size={14} /> Hướng Dẫn
         </button>
       </div>
 

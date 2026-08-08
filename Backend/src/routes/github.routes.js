@@ -45,6 +45,13 @@ try {
     url TEXT,
     saved_at TEXT DEFAULT (datetime('now', 'localtime'))
   )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS starred_repos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name TEXT UNIQUE NOT NULL,
+    owner TEXT,
+    name TEXT,
+    starred_at TEXT DEFAULT (datetime('now', 'localtime'))
+  )`);
 } catch (e) { db = null; }
 function getDB() {
   if (!db) { try { db = new (require('better-sqlite3'))(DB_PATH); } catch (e) { return null; } }
@@ -533,82 +540,77 @@ router.post('/notifications/read', (req, res) => {
 
 // --- GitHub Star/Unstar (requires GitHub PAT with repo scope) ---
 
-// Check if a repo is starred by the authenticated user
+// Check if a repo is starred — hybrid: local SQLite + GitHub API
 router.get('/starred/:owner/:name', async (req, res) => {
   try {
     const { owner, name } = req.params;
-    const response = await fetch(`https://api.github.com/user/starred/${owner}/${name}`, {
-      headers: {
-        'Authorization': `token ${GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'AI-REXI-Admin',
-      },
-    });
-    // 204 = starred, 404 = not starred
-    res.json({ success: true, starred: response.status === 204 });
+    const fullName = `${owner}/${name}`;
+    // Check local DB first
+    const d = getDB();
+    if (d) {
+      const row = d.prepare("SELECT id FROM starred_repos WHERE full_name = ?").get(fullName);
+      if (row) return res.json({ success: true, starred: true });
+    }
+    // Fallback: check GitHub API
+    if (GITHUB_TOKEN) {
+      try {
+        const response = await fetch(`https://api.github.com/user/starred/${owner}/${name}`, {
+          headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'AI-REXI-Admin' },
+        });
+        if (response.status === 204) return res.json({ success: true, starred: true });
+      } catch {}
+    }
+    res.json({ success: true, starred: false });
   } catch (error) {
     res.json({ success: true, starred: false });
   }
 });
 
-// Star a repo
+// Star a repo — hybrid: save local + try GitHub API
 router.post('/star', async (req, res) => {
   try {
-    if (!GITHUB_TOKEN) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Cần GitHub Personal Access Token. Thêm GITHUB_TOKEN vào file .env hoặc bảng khoa_api.' 
-      });
-    }
     const { owner, name } = req.body || {};
-    if (!owner || !name) {
-      return res.status(400).json({ success: false, error: 'Missing owner or name' });
+    if (!owner || !name) return res.status(400).json({ success: false, error: 'Missing owner or name' });
+    const fullName = `${owner}/${name}`;
+    // Save locally
+    const d = getDB();
+    if (d) {
+      d.prepare("INSERT OR IGNORE INTO starred_repos (full_name, owner, name) VALUES (?, ?, ?)").run(fullName, owner, name);
     }
-    const response = await fetch(`https://api.github.com/user/starred/${owner}/${name}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `token ${GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'AI-REXI-Admin',
-        'Content-Length': '0',
-      },
-    });
-    if (response.status === 204) {
-      res.json({ success: true, starred: true, message: `Starred ${owner}/${name}` });
-    } else if (response.status === 404) {
-      res.status(404).json({ success: false, error: 'Repo not found' });
-    } else {
-      const err = await response.text();
-      res.status(response.status).json({ success: false, error: err });
+    // Also try GitHub API (best effort)
+    if (GITHUB_TOKEN) {
+      try {
+        const r = await fetch(`https://api.github.com/user/starred/${owner}/${name}`, {
+          method: 'PUT', headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'AI-REXI-Admin', 'Content-Length': '0' }
+        });
+        return res.json({ success: true, starred: true, github: r.status === 204, message: `Starred ${fullName}` });
+      } catch {}
     }
+    res.json({ success: true, starred: true, github: false, message: `Starred ${fullName} (local)` });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Unstar a repo
+// Unstar a repo — hybrid: remove local + try GitHub API
 router.delete('/star/:owner/:name', async (req, res) => {
   try {
-    if (!GITHUB_TOKEN) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Cần GitHub Personal Access Token. Thêm GITHUB_TOKEN vào file .env hoặc bảng khoa_api.' 
-      });
-    }
     const { owner, name } = req.params;
-    const response = await fetch(`https://api.github.com/user/starred/${owner}/${name}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `token ${GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'AI-REXI-Admin',
-      },
-    });
-    if (response.status === 204) {
-      res.json({ success: true, starred: false, message: `Unstarred ${owner}/${name}` });
-    } else {
-      res.json({ success: true, starred: false });
+    const fullName = `${owner}/${name}`;
+    // Remove locally
+    const d = getDB();
+    if (d) {
+      d.prepare("DELETE FROM starred_repos WHERE full_name = ?").run(fullName);
     }
+    // Also try GitHub API (best effort)
+    if (GITHUB_TOKEN) {
+      try {
+        await fetch(`https://api.github.com/user/starred/${owner}/${name}`, {
+          method: 'DELETE', headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'AI-REXI-Admin' }
+        });
+      } catch {}
+    }
+    res.json({ success: true, starred: false, message: `Unstarred ${fullName}` });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

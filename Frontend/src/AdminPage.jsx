@@ -197,7 +197,8 @@ export default function AdminPage() {
   const fetchProviders = useCallback(async () => {
     setProvidersLoading(true);
     try {
-      const data = await apiFetch('/admin/providers', token);
+      // FIX: /models/admin/providers thay vì /admin/providers (route nằm trong models.routes.js)
+      const data = await apiFetch('/models/admin/providers', token);
       if (data.success) setProviders(data.providers);
     } catch (e) { showToast('Lỗi tải providers: ' + e.message, 'error'); }
     finally { setProvidersLoading(false); }
@@ -205,7 +206,8 @@ export default function AdminPage() {
 
   const fetchAdminModels = useCallback(async (prov) => {
     try {
-      const url = prov ? `/admin/models?provider=${encodeURIComponent(prov)}` : '/admin/models';
+      // FIX: /models/admin/models thay vì /admin/models
+      const url = prov ? `/models/admin/models?provider=${encodeURIComponent(prov)}` : '/models/admin/models';
       const data = await apiFetch(url, token);
       if (data.success && data.models) {
         if (prov) {
@@ -226,14 +228,14 @@ export default function AdminPage() {
     if (!newProviderName.trim() || !newApiKey.trim()) return;
     setSyncingProvider(newProviderName.trim());
     try {
-      // Upsert provider
-      const provData = await apiFetch(`/admin/providers/${newProviderName.trim()}`, token, {
+      // FIX: /models/admin/providers thay vì /admin/providers
+      const provData = await apiFetch(`/models/admin/providers/${newProviderName.trim()}`, token, {
         method: 'PUT',
         body: JSON.stringify({ ten_hien_thi: newProviderName.trim(), base_url: '', can_api_key: 1, placeholder: 'API Key', thu_tu: 0, kich_hoat: 1 })
       });
       if (!provData.success) throw new Error(provData.error || 'Lỗi lưu provider');
-      // Sync models
-      const syncRes = await apiFetch('/admin/models/sync', token, {
+      // FIX: /models/admin/models/sync thay vì /admin/models/sync
+      const syncRes = await apiFetch('/models/admin/models/sync', token, {
         method: 'POST',
         body: JSON.stringify({ provider: newProviderName.trim(), api_key: newApiKey.trim() })
       });
@@ -248,7 +250,8 @@ export default function AdminPage() {
   const handleSyncProvider = async (prov) => {
     setSyncingProvider(prov);
     try {
-      const syncRes = await apiFetch('/admin/models/sync', token, {
+      // FIX: /models/admin/models/sync thay vì /admin/models/sync
+      const syncRes = await apiFetch('/models/admin/models/sync', token, {
         method: 'POST',
         body: JSON.stringify({ provider: prov, api_key: '' })
       });
@@ -260,7 +263,8 @@ export default function AdminPage() {
 
   const toggleModelOnHome = async (modelId, currentStatus) => {
     try {
-      const data = await apiFetch(`/admin/models`, token, {
+      // FIX: /models/admin/models thay vì /admin/models
+      const data = await apiFetch(`/models/admin/models`, token, {
         method: 'POST',
         body: JSON.stringify({ ma_model: modelId, ma_nha_cung_cap: modelId.split('/')[0] || 'gemini', ten_hien_thi: modelId, kich_hoat: currentStatus ? 0 : 1 })
       });
@@ -274,7 +278,8 @@ export default function AdminPage() {
 
   const deleteModel = async (modelId) => {
     try {
-      await apiFetch(`/admin/models/${encodeURIComponent(modelId)}`, token, { method: 'DELETE' });
+      // FIX: /models/admin/models thay vì /admin/models
+      await apiFetch(`/models/admin/models/${encodeURIComponent(modelId)}`, token, { method: 'DELETE' });
       showToast('Đã xóa model', 'success');
       Object.keys(allModelsByProvider).forEach(p => fetchAdminModels(p));
     } catch (e) { showToast('Lỗi xóa: ' + e.message, 'error'); }

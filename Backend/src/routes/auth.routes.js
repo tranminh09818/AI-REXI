@@ -156,13 +156,15 @@ router.post('/google', async (req, res) => {
 // Google OAuth Callback (for OAuth flow)
 router.get('/google/callback', async (req, res) => {
     const { code, state } = req.query;
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     
     if (!code) {
-        return res.redirect('http://localhost:5173?error=google_auth_failed');
+        return res.redirect(`${frontendUrl}?error=google_auth_failed`);
     }
 
     try {
         // Exchange code for tokens
+        const callbackUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
         const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -170,7 +172,7 @@ router.get('/google/callback', async (req, res) => {
                 code,
                 client_id: process.env.VITE_GOOGLE_CLIENT_ID,
                 client_secret: process.env.GOOGLE_CLIENT_SECRET,
-                redirect_uri: 'http://localhost:5000/api/auth/google/callback',
+                redirect_uri: callbackUri,
                 grant_type: 'authorization_code'
             })
         });
@@ -179,7 +181,7 @@ router.get('/google/callback', async (req, res) => {
         
         if (!tokenData.access_token) {
             console.error('[Auth] Google token exchange failed:', tokenData);
-            return res.redirect('http://localhost:5173?error=google_token_failed');
+            return res.redirect(`${frontendUrl}?error=google_token_failed`);
         }
 
         // Get user info from Google
@@ -190,24 +192,24 @@ router.get('/google/callback', async (req, res) => {
         const googleUser = await userResponse.json();
         
         if (!googleUser.email) {
-            return res.redirect('http://localhost:5173?error=google_user_failed');
+            return res.redirect(`${frontendUrl}?error=google_user_failed`);
         }
 
         // Find or create user in database
         findOrCreateUser(googleUser.email, googleUser.name, googleUser.picture, 'google', (err, user) => {
             if (err) {
                 console.error('[Auth] Google callback user error:', err);
-                return res.redirect('http://localhost:5173?error=server_error');
+                return res.redirect(`${frontendUrl}?error=server_error`);
             }
 
             const token = generateToken(user);
             // Redirect back to frontend with token
-            res.redirect(`http://localhost:5173?google_token=${token}&user=${encodeURIComponent(JSON.stringify(sanitizeUser(user)))}`);
+            res.redirect(`${frontendUrl}?google_token=${token}&user=${encodeURIComponent(JSON.stringify(sanitizeUser(user)))}`);
         });
 
     } catch (e) {
         console.error('[Auth] Google callback error:', e);
-        return res.redirect('http://localhost:5173?error=google_callback_failed');
+        return res.redirect(`${frontendUrl}?error=google_callback_failed`);
     }
 });
 
@@ -329,7 +331,6 @@ router.put('/users/:id/role', [authMiddleware, adminMiddleware], (req, res) => {
     }
     db.run('UPDATE nguoi_dung SET phan_quyen = ? WHERE ma_nguoi_dung = ?', [phan_quyen, id], function(err) {
         if (err) return res.status(500).json({ error: 'Lỗi cập nhật phân quyền.' });
-        if (this.changes === 0) return res.status(404).json({ error: 'Không tìm thấy user.' });
         res.json({ success: true, message: `Đã đổi quyền thành ${phan_quyen}` });
     });
 });
@@ -346,7 +347,6 @@ router.put('/users/:id/status', [authMiddleware, adminMiddleware], (req, res) =>
     }
     db.run('UPDATE nguoi_dung SET trang_thai = ? WHERE ma_nguoi_dung = ?', [trang_thai, id], function(err) {
         if (err) return res.status(500).json({ error: 'Lỗi cập nhật trạng thái.' });
-        if (this.changes === 0) return res.status(404).json({ error: 'Không tìm thấy user.' });
         res.json({ success: true, trang_thai });
     });
 });

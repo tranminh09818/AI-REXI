@@ -4,15 +4,12 @@ import { X, Settings, Eye, EyeOff, RefreshCw, Zap, Globe } from 'lucide-react';
 
 const FALLBACK_PROVIDERS = {
   gemini: { name: 'Google Gemini', placeholder: 'AIzaSy...', defaultBaseUrl: '' },
-  omniroute: { name: '🌐 OmniRoute Gateway (290+ Providers)', placeholder: 'http://localhost:20128/v1 (No key needed)', defaultBaseUrl: 'http://localhost:20128/v1' },
   openai: { name: 'OpenAI GPT-4o / O3', placeholder: 'sk-proj-...', defaultBaseUrl: 'https://api.openai.com/v1' },
   claude: { name: 'Anthropic Claude 3.5', placeholder: 'sk-ant-...', defaultBaseUrl: '' },
   deepseek: { name: 'DeepSeek AI (V3/R1)', placeholder: 'sk-...', defaultBaseUrl: 'https://api.deepseek.com/v1' },
   groq: { name: 'Groq Cloud (Fast Llama)', placeholder: 'gsk_...', defaultBaseUrl: 'https://api.groq.com/openai/v1' },
   github: { name: 'GitHub Models (Free)', placeholder: 'ghp_...', defaultBaseUrl: 'https://models.inference.ai.azure.com' },
   opencode: { name: 'OpenCode Agent Engine', placeholder: 'Internal Engine', defaultBaseUrl: '' },
-  ollama: { name: 'Ollama Local AI', placeholder: 'http://localhost:11434', defaultBaseUrl: 'http://localhost:11434' },
-  freellmapi: { name: 'Free LLM API Gateway', placeholder: 'http://localhost:8080/v1', defaultBaseUrl: 'http://localhost:8080/v1' },
   custom: { name: 'Custom Endpoint / OpenRouter', placeholder: 'sk-or-v1-...', defaultBaseUrl: 'https://openrouter.ai/api/v1' }
 };
 
@@ -24,7 +21,6 @@ export default function SettingsModal({
   const [showApiKey, setShowApiKey] = useState(false);
   const [dynamicProviders, setDynamicProviders] = useState([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
-  const [isOmniRouteActive, setIsOmniRouteActive] = useState(false);
 
   // Fetch danh sách Nhà Cung Cấp động từ API khi mở Modal
   useEffect(() => {
@@ -40,7 +36,6 @@ export default function SettingsModal({
       const data = await res.json();
       if (data.success && Array.isArray(data.providers)) {
         setDynamicProviders(data.providers);
-        setIsOmniRouteActive(!!data.isOmniRouteActive);
       }
     } catch (e) {
       console.warn('Load providers failed, fallback static:', e.message);
@@ -68,7 +63,6 @@ export default function SettingsModal({
       deepseek: 'deepseek-chat',
       groq: 'llama-3.3-70b-versatile',
       github: 'gpt-4o',
-      ollama: 'llama3.2',
     };
     if (defaultModels[newProv]) {
       setModelName(defaultModels[newProv]);
@@ -98,21 +92,6 @@ export default function SettingsModal({
             <button onClick={() => setSettingsOpen(false)} className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white"><X size={16} /></button>
           </div>
         </div>
-
-        {/* OmniRoute Detection Status Badge */}
-        {isOmniRouteActive && (
-          <div className="p-2.5 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center justify-between">
-            <span className="flex items-center gap-1.5 font-medium">
-              <Globe size={14} className="text-emerald-400 animate-pulse" /> Đã phát hiện OmniRoute Gateway đang bật!
-            </span>
-            <button
-              onClick={() => handleProviderChange('omniroute')}
-              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] rounded-lg"
-            >
-              Dùng OmniRoute
-            </button>
-          </div>
-        )}
 
         <div className="space-y-4">
           <div>
@@ -144,7 +123,7 @@ export default function SettingsModal({
             />
           </div>
 
-          {provider !== 'opencode' && provider !== 'omniroute' && provider !== 'ollama' && (
+          {provider !== 'opencode' && (
             <div>
               <label className="text-xs font-medium text-slate-400 mb-1 block">API Key</label>
               <div className="relative">
@@ -173,7 +152,6 @@ export default function SettingsModal({
                 provider === 'gemini' ? 'Không cần điền — Gemini dùng API Key trực tiếp'
                 : provider === 'claude' ? 'Không cần điền — Claude dùng API Key trực tiếp'
                 : provider === 'opencode' ? 'Internal engine — không cần URL'
-                : provider === 'omniroute' ? 'http://localhost:20128/v1'
                 : 'https://api.openai.com/v1'
               }
               className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50 font-mono"

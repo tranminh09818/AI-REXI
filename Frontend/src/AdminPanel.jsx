@@ -1,13 +1,31 @@
-import React, { useState, useEffect, useCallback } from 'react';
+// ═══════════════════════════════════════════════════════════
+// ADMIN PANEL - AI REXI OS (Auto-Reloaded & Synced)
+// ═══════════════════════════════════════════════════════════
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import {
   Shield, Users, MessageSquare, Key, Layers, Settings, Home,
   Activity, Trash2, Search, RefreshCw, ChevronLeft, ChevronRight,
   Crown, User as UserIcon, Lock, Unlock, CheckCircle, XCircle,
   AlertTriangle, BarChart3, Database, Zap, Send, Eye, EyeOff,
-  Server, GitBranch, Terminal, LogOut, X, Clock, Wifi, Tv, Globe, Radar, PlayCircle
+  Server, GitBranch, Terminal, LogOut, X, Clock, Wifi, Tv, Globe, Radar, PlayCircle,
+  Plus, Pencil, Download, Loader2, Save, Bell, Code
 } from 'lucide-react';
 import { API_BASE, apiFetch } from './config';
 import GitHubTrending from './components/GitHubTrending';
+
+function codeToTwemojiUrl(code) {
+  if (!code || code.length !== 2) return null;
+  const c = code.toUpperCase();
+  const cp1 = (0x1F1E6 + c.charCodeAt(0) - 65).toString(16);
+  const cp2 = (0x1F1E6 + c.charCodeAt(1) - 65).toString(16);
+  return `https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/svg/${cp1}-${cp2}.svg`;
+}
+
+function FlagImg({ code, size = 16 }) {
+  const url = codeToTwemojiUrl(code);
+  if (!url) return <span style={{ fontSize: size }}>🌍</span>;
+  return <img src={url} alt={code} style={{ width: size, height: size, verticalAlign: 'middle' }} onError={e => { e.target.style.display = 'none'; }} />;
+}
 
 function GithubIcon({ size = 16, className = '' }) {
   return (
@@ -97,18 +115,26 @@ function DashboardTab({ stats, statsLoading }) {
 // ═══════════════════════════════════════════════════════════
 // TAB: USER MANAGEMENT
 // ═══════════════════════════════════════════════════════════
-function UsersTab({ token, currentUser, showToast, stats, statsLoading }) {
+const UsersTab = memo(function UsersTab({ token, currentUser, showToast, stats, statsLoading, fetchStats }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(() => {
+    const saved = localStorage.getItem('rexi_admin_user_page');
+    return saved ? parseInt(saved, 10) : 1;
+  });
   const [totalPages, setTotalPages] = useState(1);
   const [totalUsers, setTotalUsers] = useState(0);
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [actionLoading, setActionLoading] = useState({});
 
-  const fetchUsers = useCallback(async () => {
-    setLoading(true);
+  const handlePageChange = (newPage) => {
+    setPage(newPage);
+    localStorage.setItem('rexi_admin_user_page', newPage.toString());
+  };
+
+  const fetchUsers = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
     try {
       const params = new URLSearchParams({ page, limit: 10 });
       if (search) params.append('search', search);
@@ -118,117 +144,177 @@ function UsersTab({ token, currentUser, showToast, stats, statsLoading }) {
       setTotalUsers(data.totalUsers || 0);
     } catch (e) {
       showToast(e.message, 'error');
-      setUsers([]);
     } finally {
       setLoading(false);
     }
-  }, [page, search, token]);
+  }, [page, search, token, showToast]);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
   const changeRole = async (userId, newRole) => {
     setActionLoading(prev => ({ ...prev, [`role_${userId}`]: true }));
+    // Cập nhật lạc quan (Optimistic Update) ngay trên giao diện để tránh giật cuộn chuột
+    setUsers(prev => prev.map(u => u.ma_nguoi_dung === userId ? { ...u, phan_quyen: newRole } : u));
     try {
       await apiFetch(`/auth/users/${userId}/role`, token, { method: 'PUT', body: JSON.stringify({ phan_quyen: newRole }) });
-      showToast('Đã cập nhật quyền');
-      fetchUsers();
-    } catch (e) { showToast(e.message, 'error'); }
-    finally { setActionLoading(prev => ({ ...prev, [`role_${userId}`]: false })); }
+      showToast('Đã cập nhật quyền thành công');
+      fetchUsers(true); // Tải ngầm không unmount bảng -> Vị trí cuộn chuột đứng yên 100%
+      if (fetchStats) fetchStats();
+    } catch (e) {
+      showToast(e.message, 'error');
+      fetchUsers(true);
+    } finally {
+      setActionLoading(prev => ({ ...prev, [`role_${userId}`]: false }));
+    }
   };
 
   const changeStatus = async (userId, newStatus) => {
     setActionLoading(prev => ({ ...prev, [`status_${userId}`]: true }));
+    // Cập nhật lạc quan (Optimistic Update)
+    setUsers(prev => prev.map(u => u.ma_nguoi_dung === userId ? { ...u, trang_thai: newStatus } : u));
     try {
       await apiFetch(`/auth/users/${userId}/status`, token, { method: 'PUT', body: JSON.stringify({ trang_thai: newStatus }) });
-      showToast('Đã cập nhật trạng thái');
-      fetchUsers();
-    } catch (e) { showToast(e.message, 'error'); }
-    finally { setActionLoading(prev => ({ ...prev, [`status_${userId}`]: false })); }
+      showToast('Đã cập nhật trạng thái thành công');
+      fetchUsers(true); // Tải ngầm không unmount bảng -> Vị trí cuộn chuột đứng yên 100%
+      if (fetchStats) fetchStats();
+    } catch (e) {
+      showToast(e.message, 'error');
+      fetchUsers(true);
+    } finally {
+      setActionLoading(prev => ({ ...prev, [`status_${userId}`]: false }));
+    }
   };
 
   const statCards = [
-    { icon: Users, label: 'Tổng User', value: stats?.tong_user, bg: 'bg-indigo-500/15', text: 'text-indigo-300', border: 'border-indigo-500/20' },
-    { icon: Crown, label: 'Admin', value: stats?.tong_admin, bg: 'bg-amber-500/15', text: 'text-amber-300', border: 'border-amber-500/20' },
-    { icon: Lock, label: 'Bị Khoá', value: stats?.tong_bi_khoa, bg: 'bg-rose-500/15', text: 'text-rose-300', border: 'border-rose-500/20' },
-    { icon: MessageSquare, label: 'Hội Thoại', value: stats?.tong_hoi_thoai, bg: 'bg-cyan-500/15', text: 'text-cyan-300', border: 'border-cyan-500/20' },
-    { icon: Activity, label: 'Tin Nhắn', value: stats?.tong_tin_nhan, bg: 'bg-emerald-500/15', text: 'text-emerald-300', border: 'border-emerald-500/20' },
-    { icon: Trash2, label: 'Thùng Rác', value: stats?.tong_xoa_mem, bg: 'bg-slate-500/15', text: 'text-slate-300', border: 'border-slate-500/20' },
+    { icon: Users, label: 'Tổng User', value: stats?.tong_user, bg: 'bg-indigo-500/15', text: 'text-indigo-300', border: 'border-indigo-500/25', glow: 'shadow-indigo-500/5' },
+    { icon: Crown, label: 'Admin', value: stats?.tong_admin, bg: 'bg-amber-500/15', text: 'text-amber-300', border: 'border-amber-500/25', glow: 'shadow-amber-500/5' },
+    { icon: Lock, label: 'Bị Khoá', value: stats?.tong_bi_khoa, bg: 'bg-rose-500/15', text: 'text-rose-300', border: 'border-rose-500/25', glow: 'shadow-rose-500/5' },
+    { icon: MessageSquare, label: 'Hội Thoại', value: stats?.tong_hoi_thoai, bg: 'bg-cyan-500/15', text: 'text-cyan-300', border: 'border-cyan-500/25', glow: 'shadow-cyan-500/5' },
+    { icon: Activity, label: 'Tin Nhắn', value: stats?.tong_tin_nhan, bg: 'bg-emerald-500/15', text: 'text-emerald-300', border: 'border-emerald-500/25', glow: 'shadow-emerald-500/5' },
+    { icon: Trash2, label: 'Thùng Rác', value: stats?.tong_xoa_mem, bg: 'bg-slate-500/15', text: 'text-slate-300', border: 'border-slate-500/25', glow: 'shadow-slate-500/5' },
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* Stats Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {statCards.map((c, i) => (
-          <div key={i} className="p-4 bg-[#181920] rounded-2xl border border-white/8 shadow flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl ${c.bg} ${c.text} border ${c.border}`}><c.icon size={20} /></div>
-            <div>
-              <p className="text-[10px] text-slate-500 uppercase font-semibold">{c.label}</p>
-              <p className={`text-xl font-bold ${c.text}`}>{statsLoading ? '...' : c.value ?? 0}</p>
+          <div
+            key={i}
+            className={`p-4 bg-[#141622]/80 backdrop-blur-xl rounded-2xl border border-white/8 shadow-lg ${c.glow} flex items-center gap-3.5 hover:-translate-y-0.5 hover:border-white/20 transition-all duration-300 group`}
+          >
+            <div className={`p-2.5 rounded-xl ${c.bg} ${c.text} border ${c.border} group-hover:scale-105 transition-transform duration-300 shrink-0`}>
+              <c.icon size={20} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider truncate">{c.label}</p>
+              <p className={`text-xl font-bold ${c.text} tracking-tight truncate`}>{statsLoading ? '...' : (c.value ?? 0).toLocaleString('vi-VN')}</p>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Users Table */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2"><Users size={20} className="text-indigo-400" /> Quản Lý Người Dùng <span className="text-xs text-slate-400 font-normal">({totalUsers})</span></h2>
-        <form onSubmit={e => { e.preventDefault(); setSearch(searchInput); setPage(1); }} className="flex items-center gap-2">
-          <div className="relative">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input type="text" value={searchInput} onChange={e => setSearchInput(e.target.value)} placeholder="Tìm email, tên..." className="pl-8 pr-3 py-1.5 bg-[#1e1f20] border border-white/10 rounded-lg text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-indigo-500/50 w-48" />
+      {/* Users Table Header & Search */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#141622]/60 backdrop-blur-md p-4 rounded-2xl border border-white/8">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">
+            <Users size={18} />
           </div>
-          <button type="submit" className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-lg font-semibold">Tìm</button>
+          <div>
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              Quản Lý Người Dùng
+              <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-mono">{totalUsers}</span>
+            </h2>
+            <p className="text-[11px] text-slate-400">Danh sách tài khoản và phân quyền truy cập hệ thống</p>
+          </div>
+        </div>
+
+        <form onSubmit={e => { e.preventDefault(); setSearch(searchInput); setPage(1); }} className="flex items-center gap-2">
+          <div className="relative flex-1 sm:flex-none">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="text"
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              placeholder="Tìm email, tên người dùng..."
+              className="pl-9 pr-3 py-2 bg-[#0d0e14] border border-white/10 rounded-xl text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 w-full sm:w-64 transition-all"
+            />
+          </div>
+          <button
+            type="submit"
+            className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white text-xs rounded-xl font-bold transition-all shadow-md active:scale-95 shrink-0"
+          >
+            Tìm kiếm
+          </button>
         </form>
       </div>
 
+      {/* Users Table */}
       {loading ? (
-        <div className="text-center py-16 text-slate-400 text-sm"><RefreshCw size={20} className="animate-spin mx-auto mb-2 text-indigo-400" /> Đang tải...</div>
+        <div className="text-center py-16 text-slate-400 text-sm bg-[#141622]/40 rounded-2xl border border-white/8">
+          <RefreshCw size={22} className="animate-spin mx-auto mb-2 text-cyan-400" />
+          <span>Đang tải danh sách người dùng...</span>
+        </div>
       ) : (
-        <div className="bg-[#181920] rounded-2xl border border-white/8 overflow-hidden">
+        <div className="bg-[#141622]/90 backdrop-blur-xl rounded-2xl border border-white/8 overflow-hidden shadow-2xl">
           <table className="w-full text-sm">
-            <thead className="bg-[#13151a] border-b border-white/10">
+            <thead className="bg-[#0e0f17]/90 border-b border-white/10">
               <tr>
-                <th className="px-4 py-3 text-left text-[10px] text-slate-400 uppercase font-semibold">User</th>
-                <th className="px-4 py-3 text-left text-[10px] text-slate-400 uppercase font-semibold">Quyền</th>
-                <th className="px-4 py-3 text-left text-[10px] text-slate-400 uppercase font-semibold">Trạng Thái</th>
-                <th className="px-4 py-3 text-left text-[10px] text-slate-400 uppercase font-semibold">Ngày Tạo</th>
-                <th className="px-4 py-3 text-center text-[10px] text-slate-400 uppercase font-semibold">Hành Động</th>
+                <th className="px-5 py-3.5 text-left text-[10px] text-slate-400 uppercase font-bold tracking-wider">Tài khoản</th>
+                <th className="px-5 py-3.5 text-left text-[10px] text-slate-400 uppercase font-bold tracking-wider">Phân Quyền</th>
+                <th className="px-5 py-3.5 text-left text-[10px] text-slate-400 uppercase font-bold tracking-wider">Trạng Thái</th>
+                <th className="px-5 py-3.5 text-left text-[10px] text-slate-400 uppercase font-bold tracking-wider">Ngày Khởi Tạo</th>
+                <th className="px-5 py-3.5 text-center text-[10px] text-slate-400 uppercase font-bold tracking-wider">Thao Tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {users.map(user => {
-                const isSelf = user.ma_nguoi_dung === currentUser?.ma_nguoi_dung;
+                const isSelf = user.ma_nguoi_dung === currentUser?.ma_nguoi_dung || (user.email && user.email === currentUser?.email);
                 const isBanned = user.trang_thai === 'banned';
                 const isAdmin = user.phan_quyen === 'admin';
                 return (
-                  <tr key={user.ma_nguoi_dung} className={`hover:bg-white/3 transition-colors ${isBanned ? 'opacity-60' : ''}`}>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-500/40 to-indigo-500/40 flex items-center justify-center text-xs font-bold text-white">
+                  <tr key={user.ma_nguoi_dung} className={`hover:bg-white/[0.03] transition-colors ${isBanned ? 'opacity-55' : ''}`}>
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500/20 via-indigo-500/20 to-purple-500/20 border border-white/10 flex items-center justify-center text-xs font-bold text-cyan-300 shadow-sm shrink-0">
                           {(user.ten_day_du || user.email || '?')[0].toUpperCase()}
                         </div>
                         <div>
-                          <div className="text-sm font-medium text-slate-200 flex items-center gap-1.5">
-                            {user.ten_day_du || 'N/A'} {isSelf && <span className="text-[9px] px-1 py-0.5 rounded bg-cyan-500/20 text-cyan-400">Bạn</span>}
+                          <div className="text-xs font-bold text-slate-200 flex items-center gap-2">
+                            {user.ten_day_du || 'Chưa đặt tên'}
+                            {isSelf && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold">Bạn</span>}
                           </div>
-                          <div className="text-[11px] text-slate-500">{user.email}</div>
+                          <div className="text-[11px] text-slate-400 font-mono mt-0.5">{user.email}</div>
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3"><RoleBadge role={user.phan_quyen} /></td>
-                    <td className="px-4 py-3"><StatusBadge status={user.trang_thai || 'active'} /></td>
-                    <td className="px-4 py-3 text-[11px] text-slate-400 font-mono">{new Date(user.ngay_tao).toLocaleDateString('vi-VN')}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-5 py-3.5"><RoleBadge role={user.phan_quyen} /></td>
+                    <td className="px-5 py-3.5"><StatusBadge status={user.trang_thai || 'active'} /></td>
+                    <td className="px-5 py-3.5 text-[11px] text-slate-400 font-mono">{new Date(user.ngay_tao).toLocaleDateString('vi-VN')}</td>
+                    <td className="px-5 py-3.5">
                       {!isSelf && (
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button onClick={() => changeRole(user.ma_nguoi_dung, isAdmin ? 'user' : 'admin')} disabled={actionLoading[`role_${user.ma_nguoi_dung}`]}
-                            className={`px-2 py-1 rounded text-[10px] font-semibold ${isAdmin ? 'bg-slate-500/20 text-slate-300 hover:bg-slate-500/30' : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'}`}>
-                            {isAdmin ? 'Hạ quyền' : 'Nâng quyền'}
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => changeRole(user.ma_nguoi_dung, isAdmin ? 'user' : 'admin')}
+                            disabled={actionLoading[`role_${user.ma_nguoi_dung}`]}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 ${
+                              isAdmin
+                                ? 'bg-slate-500/15 border border-slate-500/30 text-slate-300 hover:bg-slate-500/30'
+                                : 'bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/30 shadow-sm shadow-amber-500/10'
+                            }`}
+                          >
+                            {actionLoading[`role_${user.ma_nguoi_dung}`] ? <Loader2 size={11} className="animate-spin" /> : isAdmin ? 'Hạ quyền' : 'Nâng quyền'}
                           </button>
-                          <button onClick={() => changeStatus(user.ma_nguoi_dung, isBanned ? 'active' : 'banned')} disabled={actionLoading[`status_${user.ma_nguoi_dung}`]}
-                            className={`px-2 py-1 rounded text-[10px] font-semibold ${isBanned ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30' : 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'}`}>
-                            {isBanned ? 'Mở khoá' : 'Khoá'}
+                          <button
+                            onClick={() => changeStatus(user.ma_nguoi_dung, isBanned ? 'active' : 'banned')}
+                            disabled={actionLoading[`status_${user.ma_nguoi_dung}`]}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95 ${
+                              isBanned
+                                ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 shadow-sm shadow-emerald-500/10'
+                                : 'bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/30'
+                            }`}
+                          >
+                            {actionLoading[`status_${user.ma_nguoi_dung}`] ? <Loader2 size={11} className="animate-spin" /> : isBanned ? 'Mở khoá' : 'Khoá'}
                           </button>
                         </div>
                       )}
@@ -239,11 +325,23 @@ function UsersTab({ token, currentUser, showToast, stats, statsLoading }) {
             </tbody>
           </table>
           {totalPages > 1 && (
-            <div className="px-4 py-3 border-t border-white/10 flex items-center justify-between text-xs text-slate-500">
-              <span>Trang {page}/{totalPages}</span>
-              <div className="flex gap-1">
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30"><ChevronLeft size={14} /></button>
-                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="p-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-30"><ChevronRight size={14} /></button>
+            <div className="px-5 py-3 border-t border-white/10 flex items-center justify-between text-xs text-slate-400 bg-[#0e0f17]/50">
+              <span>Hiển thị trang {page}/{totalPages}</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  disabled={page <= 1}
+                  onClick={() => handlePageChange(page - 1)}
+                  className="px-3 py-1 bg-white/5 hover:bg-white/10 disabled:opacity-40 rounded-lg text-xs"
+                >
+                  Trước
+                </button>
+                <button
+                  disabled={page >= totalPages}
+                  onClick={() => handlePageChange(page + 1)}
+                  className="px-3 py-1 bg-white/5 hover:bg-white/10 disabled:opacity-40 rounded-lg text-xs"
+                >
+                  Sau
+                </button>
               </div>
             </div>
           )}
@@ -251,12 +349,12 @@ function UsersTab({ token, currentUser, showToast, stats, statsLoading }) {
       )}
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════
 // TAB: CONVERSATIONS
 // ═══════════════════════════════════════════════════════════
-function ConversationsTab({ token, showToast }) {
+const ConversationsTab = memo(function ConversationsTab({ token, showToast }) {
   const [convs, setConvs] = useState([]);
   const [trashConvs, setTrashConvs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -297,6 +395,10 @@ function ConversationsTab({ token, showToast }) {
     try {
       await apiFetch(`/chat/admin/conversations/${convId}`, token, { method: 'DELETE' });
       showToast('Đã xoá mềm cuộc hội thoại');
+      if (selectedConv === convId) {
+        setSelectedConv(null);
+        setMessages([]);
+      }
       fetchConvs(); fetchTrash();
     } catch (e) { showToast(e.message, 'error'); }
   };
@@ -305,6 +407,10 @@ function ConversationsTab({ token, showToast }) {
     try {
       await apiFetch(`/chat/admin/conversations/${convId}/restore`, token, { method: 'POST' });
       showToast('Đã khôi phục cuộc hội thoại');
+      if (selectedConv === convId) {
+        setSelectedConv(null);
+        setMessages([]);
+      }
       fetchConvs(); fetchTrash();
     } catch (e) { showToast(e.message, 'error'); }
   };
@@ -314,6 +420,10 @@ function ConversationsTab({ token, showToast }) {
     try {
       await apiFetch(`/chat/admin/conversations/${convId}/permanent`, token, { method: 'DELETE' });
       showToast('Đã xoá vĩnh viễn');
+      if (selectedConv === convId) {
+        setSelectedConv(null);
+        setMessages([]);
+      }
       fetchTrash();
     } catch (e) { showToast(e.message, 'error'); }
   };
@@ -352,7 +462,7 @@ function ConversationsTab({ token, showToast }) {
                     ) : (
                       <>
                         <button onClick={(e) => { e.stopPropagation(); restoreConv(c.ma_hoi_thoai); }} className="text-slate-500 hover:text-emerald-400 p-1" title="Khôi phục"><RefreshCw size={12} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); permanentDelete(c.ma_hoi_thoai); }} className="text-slate-500 hover:text-rose-400 p-1" title="Xoá vĩnh viễn"><XCircle size={12} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); permanentDelete(c.ma_hoi_thoai); }} className="text-slate-500 hover:text-rose-400 p-1" title="Xoá vĩnh viễn"><Trash2 size={12} /></button>
                       </>
                     )}
                   </div>
@@ -361,145 +471,219 @@ function ConversationsTab({ token, showToast }) {
             ))}
             {displayConvs.length === 0 && <p className="text-center text-slate-500 text-xs py-8">{convTab === 'all' ? 'Không có cuộc hội thoại nào' : 'Thùng rác trống'}</p>}
           </div>
-          <div className="bg-[#181920] rounded-2xl border border-white/8 p-4 max-h-[60vh] overflow-y-auto">
+          <div className="bg-[#181920] rounded-2xl border border-white/8 p-5 max-h-[60vh] overflow-y-auto space-y-4">
             {selectedConv ? (
-              <div className="space-y-3">
-                <h3 className="text-xs font-bold text-emerald-400">Tin Nhắn</h3>
-                {messages.map(m => (
-                  <div key={m.ma_tin_nhan} className={`p-2.5 rounded-lg text-xs ${m.vai_tro === 'user' ? 'bg-cyan-500/10 text-cyan-200 ml-4' : m.vai_tro === 'admin' ? 'bg-amber-500/10 text-amber-200 ml-4' : 'bg-white/5 text-slate-300 mr-4'}`}>
-                    <span className="text-[10px] font-bold text-slate-500">{m.vai_tro === 'user' ? '👤 User' : m.vai_tro === 'admin' ? '🛡️ Admin' : '🤖 AI'}:</span>
-                    <p className="mt-1 whitespace-pre-wrap">{m.noi_dung?.substring(0, 300)}{m.noi_dung?.length > 300 ? '...' : ''}</p>
-                  </div>
-                ))}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                  <h3 className="text-xs font-bold text-emerald-400">Chi Tiết Tin Nhắn</h3>
+                  <span className="text-[10px] text-slate-500 font-mono">Tổng: {messages.length}</span>
+                </div>
+                <div className="space-y-3">
+                  {messages.map(m => {
+                    const isUser = m.vai_tro === 'user';
+                    const isAdmin = m.vai_tro === 'admin';
+                    return (
+                      <div key={m.ma_tin_nhan} className={`flex flex-col p-3 rounded-xl border transition-all ${
+                        isUser
+                          ? 'bg-cyan-500/5 border-cyan-500/10 text-cyan-200'
+                          : isAdmin
+                            ? 'bg-amber-500/5 border-amber-500/10 text-amber-200'
+                            : 'bg-[#131417]/40 border-white/5 text-slate-300'
+                      }`}>
+                        <div className="flex items-center justify-between mb-1.5 text-[10px] font-bold text-slate-400">
+                          <span>{isUser ? '👤 KHÁCH HÀNG' : isAdmin ? '🛡️ ADMIN PHẢN HỒI' : '🤖 TRỢ LÝ AI'}</span>
+                        </div>
+                        <p className="text-xs leading-relaxed whitespace-pre-wrap font-sans">{m.noi_dung}</p>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
-              <div className="flex items-center justify-center h-full text-slate-500 text-xs">Chọn cuộc hội thoại để xem tin nhắn</div>
+              <div className="flex flex-col items-center justify-center h-48 text-slate-500 text-xs">
+                <MessageSquare size={24} className="mb-2 text-slate-600" />
+                Chọn một cuộc hội thoại bên trái để xem nội dung chi tiết
+              </div>
             )}
           </div>
         </div>
       )}
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════
-// TAB: API KEYS
+// TAB: API KEYS — v2 với Auto-Scan 24h & Collapsible Providers
 // ═══════════════════════════════════════════════════════════
-function ApiKeysTab({ token, showToast }) {
+
+const PROVIDER_LABELS = {
+  gemini: { name: 'Google Gemini', icon: '🔑', color: 'text-blue-300' },
+  openrouter: { name: 'OpenRouter', icon: '🔑', color: 'text-purple-300' },
+  groq: { name: 'Groq Cloud', icon: '🔑', color: 'text-orange-300' },
+  nvidia: { name: 'Nvidia NIM', icon: '🔑', color: 'text-green-300' },
+  mistral: { name: 'Mistral AI', icon: '🔑', color: 'text-cyan-300' },
+  cerebras: { name: 'Cerebras', icon: '🔑', color: 'text-pink-300' },
+  cohere: { name: 'Cohere AI', icon: '🔑', color: 'text-sky-300' },
+  openai: { name: 'OpenAI', icon: '🔑', color: 'text-emerald-300' },
+  deepseek: { name: 'DeepSeek', icon: '🔑', color: 'text-indigo-300' },
+  opencode: { name: 'OpenCode', icon: '🔑', color: 'text-amber-300' },
+  github: { name: 'GitHub Models', icon: '🔑', color: 'text-slate-300' },
+  claude: { name: 'Anthropic', icon: '🔑', color: 'text-violet-300' },
+  grok: { name: 'xAI Grok', icon: '🔑', color: 'text-blue-400' },
+};
+
+const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newProvider, setNewProvider] = useState('gemini');
   const [newKey, setNewKey] = useState('');
-  const [baseUrlInput, setBaseUrlInput] = useState('');
-  const [scanning, setScanning] = useState(false);
-  const [publishing, setPublishing] = useState(false);
-  const [verifiedModels, setVerifiedModels] = useState([]);
-  const [scanSummary, setScanSummary] = useState(null);
-  const [selectedModel, setSelectedModel] = useState(localStorage.getItem('rexi_model') || '');
-  const [scanProvider, setScanProvider] = useState('gemini');
+  const [scanningAll, setScanningAll] = useState(false);
+  const [scanningProvider, setScanningProvider] = useState(null); // which provider is being scanned
+  const [expandedProviders, setExpandedProviders] = useState({});
+  const [scanCache, setScanCache] = useState({}); // { provider: { working: [], failed: [] } }
+  const [providerScanLog, setProviderScanLog] = useState({}); // { provider: lastScanTime }
+  const [lastFullScan, setLastFullScan] = useState(null);
 
   const fetchKeys = async () => {
     setLoading(true);
+    // FIX: /chat/keys thay vì /models/keys (route nằm trong chat.routes.js)
     try { const data = await apiFetch('/chat/keys', token); setKeys(Array.isArray(data) ? data : []); }
     catch (e) { showToast(e.message, 'error'); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchKeys(); }, []);
+  const fetchScanCache = async () => {
+    try {
+      const data = await apiFetch('/models/admin/models/scan-cache', token);
+      if (data.success) {
+        setScanCache(data.grouped || {});
+        // Build scan log map
+        const logMap = {};
+        for (const p of (data.providers || [])) logMap[p.ma_nha_cung_cap] = p.lan_quet_cuoi;
+        setProviderScanLog(logMap);
+        if (data.providers?.length > 0) {
+          const latest = data.providers.sort((a, b) => b.lan_quet_cuoi?.localeCompare(a.lan_quet_cuoi))[0];
+          setLastFullScan(latest?.lan_quet_cuoi || null);
+        }
+      }
+    } catch(e) { /* no scan data yet */ }
+  };
+
+  useEffect(() => { fetchKeys(); fetchScanCache(); }, []);
 
   const saveKey = async () => {
     if (!newKey.trim()) return;
     try {
+      // FIX: /chat/keys thay vì /models/keys
       await apiFetch('/chat/keys', token, { method: 'POST', body: JSON.stringify({ provider: newProvider, api_key: newKey }) });
-      showToast('Đã lưu API Key');
+      showToast('Đã lưu API Key ✅');
       setNewKey(''); fetchKeys();
     } catch (e) { showToast(e.message, 'error'); }
   };
 
-  // Quét & Kiểm Tra Sức Khỏe Từng Model (Live Health Test qua Groq AI Bot Analyzer)
-  const verifyAndScanModels = async () => {
-    setScanning(true);
-    setVerifiedModels([]);
-    setScanSummary(null);
+  // Quét TẤT CẢ providers — đồng bộ, chờ kết quả rồi mới hiển thị
+  const scanAll = async () => {
+    setScanningAll(true);
+    showToast('🔄 Đang quét tất cả providers...');
     try {
-      const keyEntry = keys.find(k => k.ten_nha_cung_cap === scanProvider);
-      const data = await apiFetch('/admin/models/verify-and-scan', token, {
-        method: 'POST',
-        body: JSON.stringify({
-          provider: scanProvider,
-          api_key: newKey || keyEntry?.gia_tri_khoa,
-          base_url: baseUrlInput
-        })
-      });
-      if (data.success && data.models) {
-        setVerifiedModels(data.models);
-        setScanSummary({
-          totalScanned: data.totalScanned,
-          verifiedCount: data.verifiedCount,
-          workingCount: data.workingCount,
-          analysis: data.analysis,
-          resolvedProvider: data.provider
-        });
-        const aiName = data.providerName || data.provider;
-        showToast(`Groq AI phân tích '${scanProvider}' ➔ ${aiName}: ${data.workingCount}/${data.verifiedCount} models HOẠT ĐỘNG 🟢`);
+      const data = await apiFetch('/models/admin/models/scan-all', token, { method: 'POST' });
+      await fetchScanCache();
+      if (data.message) {
+        showToast(data.message);
       } else {
-        showToast(data.error || 'Không tìm thấy model nào', 'error');
+        showToast('✅ Quét hoàn tất!');
       }
-    } catch (e) { showToast('Lỗi kiểm tra model: ' + e.message, 'error'); }
-    finally { setScanning(false); }
+    } catch(e) { showToast('Lỗi quét: ' + e.message, 'error'); }
+    finally { setScanningAll(false); }
   };
 
-  // Đẩy các Model đang hoạt động Lên Menu Trang Chủ
-  const publishActiveModelsToHomepage = async () => {
-    const workingModels = verifiedModels.filter(m => m.status === 'working');
-    if (workingModels.length === 0) {
-      showToast('Không có model nào đang hoạt động để cập nhật lên trang chủ!', 'error');
-      return;
-    }
-
-    setPublishing(true);
+  // Quét một provider đơn lẻ
+  // Quét một provider đơn lẻ — báo toast & log rõ ràng
+  const scanSingleProvider = async (providerId) => {
+    console.log('[AdminPanel] Triggering scan for provider:', providerId);
+    const provName = PROVIDER_LABELS[providerId]?.name || providerId;
+    setScanningProvider(providerId);
+    showToast(`🔄 Đang quét ${provName}...`);
     try {
-      const resolvedProv = scanSummary?.resolvedProvider || scanProvider;
-      const keyEntry = keys.find(k => k.ten_nha_cung_cap === resolvedProv);
-      const data = await apiFetch('/admin/models/publish-active', token, {
+      const data = await apiFetch('/models/admin/models/scan-provider', token, {
         method: 'POST',
-        body: JSON.stringify({
-          provider: resolvedProv,
-          api_key: newKey || keyEntry?.gia_tri_khoa,
-          models: workingModels
-        })
+        body: JSON.stringify({ provider: providerId })
       });
-
+      console.log('[AdminPanel] Scan response:', data);
       if (data.success) {
-        showToast(data.message || `🎉 Đã cập nhật ${workingModels.length} models lên trang chủ!`);
-        // Bắn custom event để App.jsx ở trang chủ tự động load lại danh sách model ở header menu
-        window.dispatchEvent(new CustomEvent('rexi_models_published', { detail: { provider: resolvedProv } }));
-        fetchKeys();
+        showToast(`✅ ${provName}: ${data.working}/${data.total} model hoạt động`);
+        await fetchScanCache();
+        window.dispatchEvent(new CustomEvent('rexi_models_published', { detail: { provider: providerId } }));
+      } else if (data.skipped) {
+        showToast(`⚠️ ${provName}: Chưa có API Key`, 'error');
       } else {
-        showToast(data.error || 'Lỗi cập nhật trang chủ', 'error');
+        showToast(data.error || 'Lỗi quét', 'error');
       }
-    } catch (e) {
-      showToast('Lỗi đăng tải: ' + e.message, 'error');
+    } catch(e) {
+      console.error('[AdminPanel] Scan error:', e);
+      showToast('Lỗi quét: ' + e.message, 'error');
     } finally {
-      setPublishing(false);
+      setScanningProvider(null);
     }
   };
 
-  const setDefaultModel = (modelId) => {
-    setSelectedModel(modelId);
-    localStorage.setItem('rexi_model', modelId);
-    showToast(`Đã chọn ${modelId} làm model mặc định`);
+  const toggleProvider = (providerId) => {
+    setExpandedProviders(prev => ({ ...prev, [providerId]: !prev[providerId] }));
   };
+
+  const formatTime = (isoStr) => {
+    if (!isoStr) return 'Chưa quét';
+    const d = new Date(isoStr);
+    return d.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  };
+
+  // All providers that have keys
+  const providerIdsWithKeys = [...new Set(keys.map(k => k.ten_nha_cung_cap))];
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-bold text-white flex items-center gap-2"><Key size={20} className="text-amber-400" /> Quản Lý API Keys & Auto Model Scanner (Powered by Groq AI Engine)</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-white flex items-center gap-2"><Key size={20} className="text-amber-400" /> API Keys & Model Scanner</h2>
+        <div className="flex items-center gap-2">
+          {lastFullScan && <span className="text-[10px] text-slate-500">🕐 Quét lần cuối: {formatTime(lastFullScan)}</span>}
+          <span className="text-[10px] text-slate-500 bg-white/5 px-2 py-1 rounded-lg">⏰ Tự động quét 3:00 AM hàng ngày</span>
+          <button
+            onClick={async () => {
+              if (window.confirm("Bạn có chắc muốn xóa sạch lịch sử cache và tắt các model cũ trong CSDL?")) {
+                try {
+                  const res = await apiFetch('/models/admin/models/clear-and-reset', token, { method: 'POST' });
+                  showToast(res.message || "Đã reset!");
+                  fetchScanCache();
+                  window.dispatchEvent(new CustomEvent('rexi_models_published'));
+                } catch(e) { showToast(e.message, 'error'); }
+              }
+            }}
+            className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl text-xs font-semibold flex items-center gap-1"
+          >
+            🧹 Xóa Hết Models Cũ
+          </button>
+          <button
+            type="button"
+            onClick={() => !scanningAll && scanAll()}
+            className={`px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 ${scanningAll ? 'opacity-50' : ''}`}
+          >
+            {scanningAll ? <RefreshCw size={12} className="animate-spin" /> : <Radar size={12} />}
+            {scanningAll ? 'Đang quét...' : '🔄 Quét Tất Cả'}
+          </button>
+        </div>
+      </div>
 
       {/* Box Thêm / Lưu Key */}
-      <div className="bg-[#181920] rounded-2xl border border-white/8 p-4">
-        <h3 className="text-xs font-bold text-amber-400 mb-3">Thêm API Key Mới</h3>
-        <div className="flex flex-wrap gap-2">
-          <select value={newProvider} onChange={e => setNewProvider(e.target.value)} className="px-3 py-2 bg-[#0d0e11] border border-white/10 rounded-xl text-xs text-white outline-none">
+      <div className="bg-[#141622]/80 backdrop-blur-xl rounded-2xl border border-white/8 p-4 shadow-xl">
+        <h3 className="text-xs font-bold text-amber-400 mb-3 flex items-center gap-2">
+          <Plus size={14} className="text-amber-400" /> Thêm / Cập Nhật API Key Mới
+        </h3>
+        <div className="flex flex-wrap gap-2.5">
+          <select
+            value={newProvider}
+            onChange={e => setNewProvider(e.target.value)}
+            className="px-3.5 py-2 bg-[#0d0e14] border border-white/10 rounded-xl text-xs text-slate-200 outline-none focus:border-cyan-500/50 transition-all font-medium"
+          >
             <option value="gemini">Google Gemini</option>
             <option value="openai">OpenAI</option>
             <option value="claude">Anthropic Claude</option>
@@ -507,190 +691,281 @@ function ApiKeysTab({ token, showToast }) {
             <option value="groq">Groq Cloud</option>
             <option value="grok">xAI Grok</option>
             <option value="github">GitHub Models</option>
-            <option value="ollama">Ollama (Local)</option>
             <option value="opencode">OpenCode Agent</option>
-            <option value="freellmapi">Free LLM API</option>
-            <option value="custom">Custom / OpenRouter</option>
+            <option value="openrouter">OpenRouter Gateway</option>
+            <option value="nvidia">Nvidia NIM</option>
+            <option value="cerebras">Cerebras</option>
+            <option value="cohere">Cohere AI</option>
+            <option value="mistral">Mistral AI</option>
+            <option value="custom">Custom / Khác</option>
           </select>
-          <input type="password" value={newKey} onChange={e => setNewKey(e.target.value)} placeholder="Nhập API Key (sk-..., AIzaSy..., gsk_...)" className="flex-1 min-w-[200px] px-3 py-2 bg-[#0d0e11] border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 outline-none font-mono" />
-          <button onClick={saveKey} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold">Lưu Key</button>
-        </div>
-      </div>
 
-      {/* Model Health Scanner & Direct Publish */}
-      <div className="bg-[#181920] rounded-2xl border border-white/8 p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-bold text-cyan-400 flex items-center gap-1.5"><Zap size={14} /> Tự Động Quét & Kiểm Tra Sức Khỏe Model (Groq AI Analyzer)</h3>
-          <span className="text-[10px] text-slate-400">🤖 Groq AI Engine tự phân tích từ khóa (`gg`, `grop`, `grok`, `xai`...) và tự tìm API link</span>
-        </div>
+          <input
+            type="password"
+            value={newKey}
+            onChange={e => setNewKey(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && saveKey()}
+            placeholder="Nhập API Key mới (sk-..., AIzaSy..., gsk_...)"
+            className="flex-1 min-w-[220px] px-3.5 py-2 bg-[#0d0e14] border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500/50 font-mono transition-all"
+          />
 
-        <div className="flex flex-wrap gap-2">
-          <div className="relative flex-1 min-w-[180px]">
-            <input
-              type="text"
-              value={scanProvider}
-              onChange={e => setScanProvider(e.target.value)}
-              placeholder="Nhập tên nhà cung cấp (vd: gg, grop, grok, xai, anthropic, openai)..."
-              className="w-full px-3 py-2 bg-[#0d0e11] border border-cyan-500/30 focus:border-cyan-400 rounded-xl text-xs text-cyan-300 placeholder-slate-500 outline-none font-medium"
-            />
-            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-slate-500 bg-white/5 px-1.5 py-0.5 rounded pointer-events-none">AI Smart Input</span>
-          </div>
-
-          <input type="password" value={newKey} onChange={e => setNewKey(e.target.value)} placeholder="API Key (từ ô trên hoặc đã lưu)" className="flex-1 min-w-[180px] px-3 py-2 bg-[#0d0e11] border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 outline-none font-mono" />
-
-          <input type="text" value={baseUrlInput} onChange={e => setBaseUrlInput(e.target.value)} placeholder="Base URL Endpoint (tùy chọn)" className="w-48 px-3 py-2 bg-[#0d0e11] border border-white/10 rounded-xl text-xs text-white placeholder-slate-500 outline-none font-mono" />
-
-          <button onClick={verifyAndScanModels} disabled={scanning} className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-lg">
-            {scanning ? <><RefreshCw size={13} className="animate-spin" /> Groq AI Đang Phân Tích & Quét...</> : <><Search size={13} /> 🤖 AI Quét & Test Health Models</>}
+          <button
+            onClick={saveKey}
+            className="px-4 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 shrink-0"
+          >
+            Lưu Key
           </button>
         </div>
-
-        {/* Scan Results & Groq AI Analysis Banner */}
-        {scanSummary && (
-          <div className="p-3 bg-[#131417] rounded-xl border border-white/5 space-y-3">
-            {scanSummary.analysis && (
-              <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-xs text-cyan-300 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Bot size={16} className="text-cyan-400 animate-pulse shrink-0" />
-                  <span>
-                    🤖 <b>Groq AI Engine đã phân tích:</b> Từ khóa <i>&ldquo;{scanProvider}&rdquo;</i> ➔ <b>{scanSummary.analysis.providerName}</b> (<code className="text-amber-300">{scanSummary.analysis.providerId}</code>)
-                  </span>
-                </div>
-                <span className="font-mono text-[10px] text-slate-400 bg-black/40 px-2 py-1 rounded truncate max-w-[300px]" title={scanSummary.analysis.modelsEndpoint}>
-                  🔗 Link API: {scanSummary.analysis.modelsEndpoint}
-                </span>
-              </div>
-            )}
-
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-300 font-medium">
-                Kết quả kiểm tra health: <span className="text-emerald-400 font-bold">{scanSummary.workingCount}</span> / {scanSummary.verifiedCount} models ĐANG HOẠT ĐỘNG 🟢
-              </span>
-              {verifiedModels.filter(m => m.status === 'working').length > 0 && (
-                <button
-                  onClick={publishActiveModelsToHomepage}
-                  disabled={publishing}
-                  className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-bold rounded-xl shadow-xl flex items-center gap-2 transition-all"
-                >
-                  {publishing ? <RefreshCw size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                  🚀 Cập Nhật {verifiedModels.filter(m => m.status === 'working').length} Models Đang Hoạt Động Lên Trang Chủ
-                </button>
-              )}
-            </div>
-
-            {/* Models Table List */}
-            <div className="max-h-64 overflow-y-auto space-y-1 pr-1">
-              {verifiedModels.map(m => (
-                <div
-                  key={m.id}
-                  onClick={() => m.status === 'working' && setDefaultModel(m.id)}
-                  className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs cursor-pointer transition-all border ${
-                    m.status === 'working'
-                      ? selectedModel === m.id
-                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-200'
-                        : 'bg-[#181920] hover:bg-emerald-500/10 text-slate-200 border-white/5'
-                      : 'bg-rose-950/20 border-rose-500/20 text-rose-300 opacity-70'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${m.status === 'working' ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-rose-500'}`}></span>
-                    <span className="font-mono truncate">{m.id}</span>
-                  </div>
-
-                  <div className="flex items-center gap-3 shrink-0 text-[10px]">
-                    {m.status === 'working' ? (
-                      <>
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono">⚡ {m.latency_ms}ms</span>
-                        <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-semibold">ĐANG HOẠT ĐỘNG</span>
-                      </>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 truncate max-w-[200px]" title={m.error}>
-                        ❌ {m.error || 'Lỗi kết nối'}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Saved Keys Table */}
-      <div className="bg-[#181920] rounded-2xl border border-white/8 overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/5"><h3 className="text-xs font-bold text-slate-300">API Keys đã lưu trong CSDL</h3></div>
-        {loading ? <div className="text-center py-8 text-slate-400 text-xs"><RefreshCw size={16} className="animate-spin mx-auto mb-1" /> Đang tải...</div> : (
-          <table className="w-full text-sm">
-            <thead className="bg-[#13151a] border-b border-white/10">
-              <tr><th className="px-4 py-3 text-left text-[10px] text-slate-400 uppercase">Provider</th><th className="px-4 py-3 text-left text-[10px] text-slate-400 uppercase">Key</th></tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {keys.map(k => (
-                <tr key={k.ma_khoa} className="hover:bg-white/3">
-                  <td className="px-4 py-3 text-xs font-medium text-amber-300 uppercase">{k.ten_nha_cung_cap}</td>
-                  <td className="px-4 py-3 text-xs text-slate-400 font-mono">{k.gia_tri_khoa}</td>
-                </tr>
-              ))}
-              {keys.length === 0 && <tr><td colSpan={2} className="text-center py-6 text-slate-500 text-xs">Chưa có API Key nào trong CSDL</td></tr>}
-            </tbody>
-          </table>
+      {/* Danh sách Providers — Collapsible 60fps */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold text-slate-300 flex items-center gap-2">
+            <Activity size={14} className="text-emerald-400" /> Nhà Cung Cấp & Trạng Thái Model
+            <span className="text-slate-500 font-normal text-[11px]">(Bấm vào dòng để xem danh sách chi tiết)</span>
+          </h3>
+        </div>
+
+        {loading ? (
+          <div className="text-center py-12 text-slate-400 text-xs bg-[#141622]/40 rounded-2xl border border-white/8">
+            <RefreshCw size={20} className="animate-spin mx-auto mb-2 text-cyan-400" />
+            <span>Đang tải danh sách nhà cung cấp...</span>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {providerIdsWithKeys.map(providerId => {
+              const label = PROVIDER_LABELS[providerId] || { name: providerId.toUpperCase(), icon: '🔑', color: 'text-slate-300' };
+              const cache = scanCache[providerId] || { working: [], failed: [] };
+              const isExpanded = expandedProviders[providerId];
+              const isScanning = scanningProvider === providerId;
+              const lastScan = providerScanLog[providerId];
+              const totalModels = cache.working.length + cache.failed.length;
+              const key = keys.find(k => k.ten_nha_cung_cap === providerId);
+
+              return (
+                <div key={providerId} className="bg-[#141622]/80 backdrop-blur-xl rounded-2xl border border-white/8 overflow-hidden shadow-lg hover:border-white/15 transition-all duration-300">
+                  {/* Provider Header Row */}
+                  <div className="flex items-center justify-between px-4 py-3 bg-[#10111a]/80">
+                    <div
+                      className="flex items-center gap-3 flex-1 cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => toggleProvider(providerId)}
+                    >
+                      <span className="text-base">{label.icon}</span>
+                      <div>
+                        <span className={`text-xs font-bold ${label.color}`}>{label.name}</span>
+                        <div className="text-[10px] text-slate-500 mt-0.5 font-mono flex items-center gap-2">
+                          <span>{key?.gia_tri_khoa ? key.gia_tri_khoa.substring(0, 6) + '...' + key.gia_tri_khoa.slice(-4) : 'Chưa có key'}</span>
+                          {lastScan && <span className="text-slate-600">· Quét: {formatTime(lastScan)}</span>}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      {totalModels > 0 && (
+                        <div className="flex items-center gap-1.5 text-[10px]">
+                          <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-semibold border border-emerald-500/20">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>
+                            {cache.working.length} OK
+                          </span>
+                          {cache.failed.length > 0 && (
+                            <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-400 font-semibold border border-rose-500/20">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                              {cache.failed.length} Lỗi
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {totalModels === 0 && <span className="text-[10px] text-slate-500">Chưa quét</span>}
+
+                      <button
+                        type="button"
+                        onClick={() => !isScanning && scanSingleProvider(providerId)}
+                        className={`px-3 py-1 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 rounded-xl text-[10px] font-bold flex items-center gap-1.5 transition-all active:scale-95 shadow-sm ${isScanning ? 'opacity-50' : ''}`}
+                      >
+                        {isScanning ? <RefreshCw size={10} className="animate-spin text-cyan-300" /> : <Search size={10} className="text-cyan-300" />}
+                        {isScanning ? 'Đang quét...' : 'Quét'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => toggleProvider(providerId)}
+                        className="p-1 text-slate-400 hover:text-white transition-colors"
+                      >
+                        <ChevronRight size={16} className={`transition-transform duration-300 ${isExpanded ? 'rotate-90 text-cyan-400' : ''}`} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Smooth CSS Grid Accordion 60fps */}
+                  <div
+                    className={`grid transition-all duration-300 ease-in-out ${
+                      isExpanded ? 'grid-rows-[1fr] opacity-100 border-t border-white/5' : 'grid-rows-[0fr] opacity-0'
+                    }`}
+                  >
+                    <div className="overflow-hidden">
+                      <div className="px-4 py-3 space-y-1.5 max-h-72 overflow-y-auto scrollbar-thin">
+                        {totalModels === 0 ? (
+                          <div className="text-center py-4 text-slate-500 text-xs">
+                            Chưa có dữ liệu quét. Bấm nút <b className="text-cyan-400">Quét</b> để kiểm tra.
+                          </div>
+                        ) : (
+                          <>
+                            {cache.working.map(m => (
+                              <div key={m.ma_model} className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/10 text-xs transition-colors">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399] shrink-0"></span>
+                                  <span className="font-mono text-slate-200 truncate">{m.ma_model}</span>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {m.do_tre_ms > 0 && <span className="text-[10px] text-emerald-400 font-mono">⚡ {m.do_tre_ms}ms</span>}
+                                  <span className="text-[10px] text-emerald-400 font-semibold">✅ Hoạt động</span>
+                                </div>
+                              </div>
+                            ))}
+                            {cache.failed.map(m => (
+                              <div key={m.ma_model} className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-rose-500/5 border border-rose-500/10 text-xs opacity-70">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
+                                  <span className="font-mono text-slate-400 truncate">{m.ma_model}</span>
+                                </div>
+                                <span className="text-[10px] text-rose-400 truncate max-w-[220px]" title={m.loi_chi_tiet}>❌ {m.loi_chi_tiet || 'Lỗi kết nối'}</span>
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {providerIdsWithKeys.length === 0 && (
+              <div className="text-center py-8 text-slate-500 text-xs bg-[#141622]/80 backdrop-blur-xl rounded-2xl border border-white/8">
+                Chưa có API Key nào được cấu hình. Thêm key ở phía trên.
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
   );
-}
+});
 
-// ═══════════════════════════════════════════════════════════
 // TAB: SKILLS
 // ═══════════════════════════════════════════════════════════
-function SkillsTab({ token, showToast }) {
+const SkillsTab = memo(function SkillsTab({ token, showToast }) {
   const [skills, setSkills] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState(null);
 
-  useEffect(() => {
-    (async () => {
+  const fetchSkills = async () => {
+    setLoading(true);
+    try {
+      // Lấy TẤT CẢ skills (kể cả bị tắt) để admin có thể bật/tắt
+      const data = await apiFetch('/services/skills/all', token);
+      setSkills(Array.isArray(data) ? data : []);
+    } catch (e) {
+      // Fallback: lấy chỉ skills đang kích hoạt
       try { const data = await apiFetch('/services/skills', token); setSkills(Array.isArray(data) ? data : []); }
-      catch (e) { showToast(e.message, 'error'); }
-      finally { setLoading(false); }
-    })();
-  }, []);
+      catch (e2) { showToast(e2.message, 'error'); }
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { fetchSkills(); }, []);
+
+  const toggleSkill = async (skill) => {
+    setToggling(skill.ma_ky_nang);
+    const newStatus = skill.trang_thai === 'kich_hoat' ? 'vo_hieu' : 'kich_hoat';
+    try {
+      await apiFetch(`/services/skills/${skill.ma_ky_nang}/toggle`, token, {
+        method: 'PUT',
+        body: JSON.stringify({ trang_thai: newStatus })
+      });
+      showToast(`${newStatus === 'kich_hoat' ? '✅ Đã bật' : '⛔ Đã tắt'}: ${skill.tieu_de || skill.ten_ky_nang}`);
+      await fetchSkills();
+    } catch (e) { showToast('Lỗi toggle skill: ' + e.message, 'error'); }
+    finally { setToggling(null); }
+  };
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-bold text-white flex items-center gap-2"><Layers size={20} className="text-purple-400" /> Kỹ Năng Agent <span className="text-xs text-slate-400 font-normal">({skills.length})</span></h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-white flex items-center gap-2"><Layers size={20} className="text-purple-400" /> Kỹ Năng Agent
+          <span className="text-xs text-slate-400 font-normal">({skills.filter(s=>s.trang_thai==='kich_hoat').length}/{skills.length} đang bật)</span>
+        </h2>
+        <button onClick={fetchSkills} className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors">
+          <RefreshCw size={13} />
+        </button>
+      </div>
       {loading ? <div className="text-center py-8 text-slate-400 text-xs"><RefreshCw size={16} className="animate-spin mx-auto mb-1" /> Đang tải...</div> : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {skills.map(s => (
-            <div key={s.ma_ky_nang} className="p-3 bg-[#181920] rounded-xl border border-white/8 hover:border-purple-500/30 transition-all">
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">{s.ten_ky_nang}</span>
-              <p className="text-xs font-semibold text-slate-200 mt-1.5">{s.tieu_de}</p>
-              <p className="text-[11px] text-slate-400 mt-1">{s.mo_ta}</p>
-            </div>
-          ))}
+          {skills.map(s => {
+            const isActive = s.trang_thai === 'kich_hoat';
+            return (
+              <div key={s.ma_ky_nang} className={`p-3 bg-[#181920] rounded-xl border transition-all ${
+                isActive ? 'border-purple-500/30 hover:border-purple-400/50' : 'border-white/5 opacity-50 hover:opacity-75'
+              }`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">{s.ten_ky_nang}</span>
+                    <p className="text-xs font-semibold text-slate-200 mt-1.5">{s.tieu_de}</p>
+                    <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{s.mo_ta}</p>
+                  </div>
+                  <button
+                    onClick={() => toggleSkill(s)}
+                    disabled={toggling === s.ma_ky_nang}
+                    title={isActive ? 'Tắt kỹ năng này' : 'Bật kỹ năng này'}
+                    className={`shrink-0 w-10 h-5 rounded-full transition-all relative ${
+                      toggling === s.ma_ky_nang ? 'opacity-50' : ''
+                    } ${isActive ? 'bg-purple-500' : 'bg-white/10'}`}
+                  >
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${
+                      isActive ? 'left-5' : 'left-0.5'
+                    }`} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════
 // TAB: ADMIN CHAT
 // ═══════════════════════════════════════════════════════════
-function AdminChatTab({ token, currentUser, showToast }) {
+const AdminChatTab = memo(function AdminChatTab({ token, currentUser, showToast }) {
   const [convs, setConvs] = useState([]);
   const [selectedConv, setSelectedConv] = useState(null);
   const [messages, setMessages] = useState([]);
   const [reply, setReply] = useState('');
   const [loading, setLoading] = useState(true);
+  const [prevConvCount, setPrevConvCount] = useState(0);
+  const selectedConvRef = React.useRef(null);
 
-  const fetchConvs = async () => {
-    setLoading(true);
-    try { const data = await apiFetch('/chat/conversations/all', token); setConvs(Array.isArray(data) ? data : []); }
-    catch (e) { showToast(e.message, 'error'); }
-    finally { setLoading(false); }
+  const fetchConvs = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const data = await apiFetch('/chat/conversations/all', token);
+      const list = Array.isArray(data) ? data : [];
+      setConvs(list);
+      // Thông báo nếu có hội thoại mới (auto-refresh)
+      if (silent && list.length > prevConvCount) showToast(`🔔 Có ${list.length - prevConvCount} hội thoại mới!`);
+      setPrevConvCount(list.length);
+    } catch (e) { if (!silent) showToast(e.message, 'error'); }
+    finally { if (!silent) setLoading(false); }
   };
 
-  useEffect(() => { fetchConvs(); }, []);
+  // Auto-refresh danh sách hội thoại mỗi 60s
+  useEffect(() => {
+    fetchConvs();
+    const interval = setInterval(() => fetchConvs(true), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   const selectConv = async (convId) => {
     setSelectedConv(convId);
@@ -751,13 +1026,16 @@ function AdminChatTab({ token, currentUser, showToast }) {
       </div>
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════
 // TAB: SYSTEM SETTINGS
 // ═══════════════════════════════════════════════════════════
-function SettingsTab({ token, showToast }) {
+const SettingsTab = memo(function SettingsTab({ token, showToast }) {
   const [gitStatus, setGitStatus] = useState(null);
+  const [gitDiff, setGitDiff] = useState('');
+  const [showDiff, setShowDiff] = useState(false);
+  const [diffLoading, setDiffLoading] = useState(false);
   const [execCmd, setExecCmd] = useState('');
   const [execOutput, setExecOutput] = useState('');
   const [cacheMsg, setCacheMsg] = useState('');
@@ -765,6 +1043,16 @@ function SettingsTab({ token, showToast }) {
   const fetchGit = async () => {
     try { const data = await apiFetch('/chat/git/status', token); setGitStatus(data); }
     catch (e) { showToast(e.message, 'error'); }
+  };
+
+  const fetchGitDiff = async () => {
+    setDiffLoading(true);
+    try {
+      const data = await apiFetch('/chat/git/diff', token);
+      setGitDiff(data.diff || 'Không có thay đổi chưa commit.');
+      setShowDiff(true);
+    } catch (e) { showToast('Lỗi git diff: ' + e.message, 'error'); }
+    finally { setDiffLoading(false); }
   };
 
   useEffect(() => { fetchGit(); }, []);
@@ -795,7 +1083,21 @@ function SettingsTab({ token, showToast }) {
           {gitStatus?.isGit ? (
             <div className="space-y-2 text-xs text-slate-300">
               <p>Branch: <span className="text-cyan-300 font-mono">{gitStatus.branch}</span></p>
-              {gitStatus.changes?.length > 0 && <p className="text-amber-300">{gitStatus.changes.length} files changed</p>}
+              {gitStatus.changes?.length > 0 && (
+                <div>
+                  <p className="text-amber-300 mb-1">{gitStatus.changes.length} files changed:</p>
+                  <div className="space-y-0.5 max-h-24 overflow-y-auto">
+                    {gitStatus.changes.map((f, i) => (
+                      <p key={i} className="font-mono text-[10px] text-slate-400 truncate">{f}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <button onClick={fetchGitDiff} disabled={diffLoading}
+                className="mt-2 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/40 border border-cyan-500/30 text-cyan-300 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-colors">
+                {diffLoading ? <RefreshCw size={11} className="animate-spin" /> : <Code size={11} />}
+                Xem Git Diff
+              </button>
             </div>
           ) : <p className="text-xs text-slate-500">Không có Git repo</p>}
         </div>
@@ -817,14 +1119,26 @@ function SettingsTab({ token, showToast }) {
           {execOutput && <pre className="mt-2 p-2 bg-black/40 rounded-lg text-[11px] text-slate-300 font-mono max-h-32 overflow-auto">{execOutput}</pre>}
         </div>
       </div>
+      {/* Git Diff Modal */}
+      {showDiff && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setShowDiff(false)}>
+          <div className="bg-[#16171f] border border-white/10 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-cyan-300 flex items-center gap-2"><GitBranch size={14} /> Git Diff — {gitStatus?.branch}</h3>
+              <button onClick={() => setShowDiff(false)} className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors"><X size={14} /></button>
+            </div>
+            <pre className="p-4 overflow-auto flex-1 text-[11px] font-mono text-slate-300 leading-relaxed whitespace-pre-wrap">{gitDiff}</pre>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════
 // TAB: IPTV MONITOR
 // ═══════════════════════════════════════════════════════════
-function IptvTab({ token, showToast }) {
+const IptvTab = memo(function IptvTab({ token, showToast }) {
   const [status, setStatus] = useState(null);
   const [stats, setStats] = useState(null);
   const [countries, setCountries] = useState([]);
@@ -835,6 +1149,14 @@ function IptvTab({ token, showToast }) {
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [limit, setLimit] = useState(50);
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ channel_name: '', url: '', logo: '', group_name: '', country: '', status: 'unknown' });
+  const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(null);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifs, setShowNotifs] = useState(false);
 
   const load = useCallback(async (all = false) => {
     try {
@@ -877,6 +1199,101 @@ function IptvTab({ token, showToast }) {
     } catch (e) { showToast(e.message, 'error'); setScanning(false); }
   };
 
+  const openAdd = () => {
+    setEditing(null);
+    setForm({ channel_name: '', url: '', logo: '', group_name: '', country: '', status: 'unknown' });
+    setShowForm(true);
+  };
+
+  const openEdit = (ch) => {
+    setEditing(ch);
+    setForm({ channel_name: ch.channel_name, url: ch.url, logo: ch.logo || '', group_name: ch.group_name || '', country: ch.country || '', status: ch.status });
+    setShowForm(true);
+  };
+
+  const saveChannel = async () => {
+    if (!form.channel_name.trim() || !form.url.trim()) return showToast('Cần nhập tên và URL', 'error');
+    setSaving(true);
+    try {
+      if (editing) {
+        await apiFetch(`/admin/channels/${editing.id}`, token, { method: 'PUT', body: JSON.stringify(form) });
+        showToast('Đã cập nhật kênh');
+      } else {
+        await apiFetch('/admin/channels', token, { method: 'POST', body: JSON.stringify(form) });
+        showToast('Đã thêm kênh mới');
+      }
+      setShowForm(false);
+      loadChannels();
+    } catch (e) { showToast(e.message, 'error'); }
+    finally { setSaving(false); }
+  };
+
+  const deleteChannel = async (ch) => {
+    if (!window.confirm(`Xóa kênh "${ch.channel_name}"?`)) return;
+    try {
+      await apiFetch(`/admin/channels/${ch.id}`, token, { method: 'DELETE' });
+      showToast('Đã xóa kênh');
+      loadChannels();
+    } catch (e) { showToast(e.message, 'error'); }
+  };
+
+  const downloadExport = async (fmt) => {
+    setExporting(fmt);
+    try {
+      const q = new URLSearchParams();
+      if (filters.country) q.set('country', filters.country);
+      if (filters.status) q.set('status', filters.status);
+      if (filters.search) q.set('search', filters.search);
+      const url = `${API_BASE}/admin/channels/export/${fmt}?${q}`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+      const blob = await res.blob();
+      const ext = fmt === 'm3u' ? 'm3u' : fmt;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `iptv-channels.${ext}`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast(`Đã tải ${fmt.toUpperCase()} thành công`);
+    } catch (e) { showToast(e.message, 'error'); }
+    finally { setExporting(null); }
+  };
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      const data = await apiFetch('/admin/notifications?limit=30', token);
+      setNotifications(data.notifications || []);
+      setUnreadCount(data.unread || 0);
+    } catch {}
+  }, [token]);
+
+  useEffect(() => { loadNotifications(); }, [loadNotifications]);
+
+  const markAllRead = async () => {
+    try {
+      await apiFetch('/admin/notifications/read-all', token, { method: 'PUT' });
+      setNotifications(n => n.map(x => ({ ...x, is_read: 1 })));
+      setUnreadCount(0);
+    } catch {}
+  };
+
+  const markRead = async (id) => {
+    try {
+      await apiFetch(`/admin/notifications/${id}/read`, token, { method: 'PUT' });
+      setNotifications(n => n.map(x => x.id === id ? { ...x, is_read: 1 } : x));
+      setUnreadCount(c => Math.max(0, c - 1));
+    } catch {}
+  };
+
+  const deleteNotif = async (id) => {
+    try {
+      await apiFetch(`/admin/notifications/${id}`, token, { method: 'DELETE' });
+      setNotifications(n => n.filter(x => x.id !== id));
+      const was = notifications.find(x => x.id === id);
+      if (was && !was.is_read) setUnreadCount(c => Math.max(0, c - 1));
+    } catch {}
+  };
+
   const total = status?.total_channels || stats?.summary?.total_all || 0;
   const online = status?.total_online || stats?.summary?.total_online || 0;
   const onlinePct = stats?.summary?.online_pct || (total ? ((online / total) * 100).toFixed(1) : '0');
@@ -899,11 +1316,66 @@ function IptvTab({ token, showToast }) {
               <Radar size={12} className="animate-pulse" /> Đang scan...
             </span>
           )}
+          <button onClick={openAdd}
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold">
+            <Plus size={13} /> Thêm kênh
+          </button>
+          <div className="relative group">
+            <button className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl text-xs font-semibold">
+              <Download size={13} /> Export {exporting && <Loader2 size={11} className="animate-spin" />}
+            </button>
+            <div className="absolute right-0 top-full mt-1 bg-[#1a1b23] border border-white/10 rounded-xl shadow-xl py-1 hidden group-hover:block z-10 min-w-[120px]">
+              <button onClick={() => downloadExport('m3u')} className="w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-white/10">M3U Playlist</button>
+              <button onClick={() => downloadExport('csv')} className="w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-white/10">CSV Spreadsheet</button>
+              <button onClick={() => downloadExport('json')} className="w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-white/10">JSON Data</button>
+            </div>
+          </div>
           <button onClick={runScan} disabled={scanning}
             className="flex items-center gap-1.5 px-4 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold">
             <PlayCircle size={13} /> {scanning ? 'Đang quét...' : 'Quét kênh'}
           </button>
           <button onClick={() => load(true)} className="p-2 rounded-xl hover:bg-white/10 text-slate-400"><RefreshCw size={14} /></button>
+          <div className="relative">
+            <button onClick={() => { setShowNotifs(!showNotifs); if (!showNotifs) loadNotifications(); }}
+              className="p-2 rounded-xl hover:bg-white/10 text-slate-400 relative">
+              <Bell size={14} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-rose-500 text-white text-[9px] font-bold px-1">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </button>
+            {showNotifs && (
+              <div className="absolute right-0 top-full mt-1 bg-[#1a1b23] border border-white/10 rounded-xl shadow-2xl w-80 z-20">
+                <div className="px-3 py-2.5 border-b border-white/5 flex items-center justify-between">
+                  <span className="text-xs font-bold text-white">Thông báo</span>
+                  {unreadCount > 0 && (
+                    <button onClick={markAllRead} className="text-[10px] text-sky-400 hover:text-sky-300">Đọc tất cả</button>
+                  )}
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {notifications.length === 0 && <div className="p-5 text-center text-xs text-slate-500">Chưa có thông báo</div>}
+                  {notifications.map(n => (
+                    <div key={n.id} onClick={() => { if (!n.is_read) markRead(n.id); }}
+                      className={`px-3 py-2.5 border-b border-white/5 cursor-pointer hover:bg-white/5 ${!n.is_read ? 'bg-sky-500/5' : ''}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            {!n.is_read && <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0"></span>}
+                            <span className="text-[11px] font-semibold text-white">{n.title}</span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-2">{n.message}</p>
+                          <span className="text-[9px] text-slate-500 mt-1 block">{new Date(n.created_at).toLocaleString('vi-VN')}</span>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); deleteNotif(n.id); }}
+                          className="p-1 rounded hover:bg-white/10 text-slate-500 hover:text-rose-400 shrink-0"><X size={11} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -927,7 +1399,7 @@ function IptvTab({ token, showToast }) {
           <div className="max-h-[420px] overflow-y-auto">
             {countries.slice(0, 15).map(c => (
               <div key={c.code} className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 text-xs">
-                <div className="flex items-center gap-2 text-slate-300"><span>{c.flag}</span> {c.name} <span className="text-slate-500">({c.code})</span></div>
+                <div className="flex items-center gap-2 text-slate-300"><FlagImg code={c.code} /> {c.name} <span className="text-slate-500">({c.code})</span></div>
                 <div className="flex items-center gap-2">
                   <span className="text-emerald-400">{c.online}✓</span>
                   <span className="text-rose-400">{c.offline}✗</span>
@@ -952,7 +1424,7 @@ function IptvTab({ token, showToast }) {
             <select value={filters.country} onChange={e => setFilters(f => ({ ...f, country: e.target.value, page: 1 }))}
               className="px-2 py-1.5 bg-[#0d0e11] border border-white/10 rounded-lg text-[11px] text-slate-300 outline-none">
               <option value="">Mọi quốc gia</option>
-              {countries.map(c => <option key={c.code} value={c.code}>{c.flag} {c.name}</option>)}
+              {countries.map(c => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
             </select>
             <div className="flex items-center gap-1.5 bg-[#0d0e11] border border-white/10 rounded-lg px-2 py-1">
               <Search size={12} className="text-slate-500" />
@@ -969,6 +1441,7 @@ function IptvTab({ token, showToast }) {
                   <th className="px-2 py-2">Quốc gia</th>
                   <th className="px-2 py-2">Nhóm</th>
                   <th className="px-4 py-2 text-right">Ping</th>
+                  <th className="px-2 py-2 text-right">Hành động</th>
                 </tr>
               </thead>
               <tbody>
@@ -978,12 +1451,18 @@ function IptvTab({ token, showToast }) {
                       ? <span className="text-emerald-400"><CheckCircle size={12} /></span>
                       : <span className="text-rose-400"><XCircle size={12} /></span>}</td>
                     <td className="px-2 py-2 text-slate-200 font-medium max-w-[220px] truncate">{ch.channel_name}</td>
-                    <td className="px-2 py-2 text-slate-400">{ch.country}</td>
+                    <td className="px-2 py-2 text-slate-400">{ch.country ? <span className="inline-flex items-center gap-1.5"><FlagImg code={ch.country} /> <span>{ch.country}</span></span> : '—'}</td>
                     <td className="px-2 py-2 text-slate-400 max-w-[120px] truncate">{ch.group_name}</td>
                     <td className="px-4 py-2 text-right text-slate-400">{ch.latency_ms > 0 ? `${ch.latency_ms}ms` : '—'}</td>
+                    <td className="px-2 py-2 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => openEdit(ch)} className="p-1 rounded hover:bg-white/10 text-slate-400 hover:text-sky-400" title="Sửa"><Pencil size={12} /></button>
+                        <button onClick={() => deleteChannel(ch)} className="p-1 rounded hover:bg-white/10 text-slate-400 hover:text-rose-400" title="Xóa"><Trash2 size={12} /></button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
-                {channels.length === 0 && !loading && <tr><td colSpan={5} className="p-6 text-center text-slate-500">Không có kênh nào</td></tr>}
+                {channels.length === 0 && !loading && <tr><td colSpan={6} className="p-6 text-center text-slate-500">Không có kênh nào</td></tr>}
               </tbody>
             </table>
             {loading && <div className="p-4 text-center text-[11px] text-slate-500">Đang tải...</div>}
@@ -1028,40 +1507,122 @@ function IptvTab({ token, showToast }) {
           {history.length === 0 && <div className="p-6 text-center text-xs text-slate-500">Chưa có lịch sử quét</div>}
         </div>
       </div>
+
+      {/* Add/Edit Channel Modal */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowForm(false)}>
+          <div className="bg-[#1a1b23] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                {editing ? <><Pencil size={14} className="text-sky-400" /> Sửa kênh</> : <><Plus size={14} className="text-emerald-400" /> Thêm kênh mới</>}
+              </h3>
+              <button onClick={() => setShowForm(false)} className="p-1 rounded-lg hover:bg-white/10 text-slate-400"><X size={16} /></button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Tên kênh *</label>
+                <input value={form.channel_name} onChange={e => setForm(f => ({ ...f, channel_name: e.target.value }))}
+                  className="w-full px-3 py-2 bg-[#0d0e11] border border-white/10 rounded-lg text-sm text-white outline-none focus:border-sky-500"
+                  placeholder="VD: VTV1 HD - Thời Sự" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">URL stream *</label>
+                <input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))}
+                  className="w-full px-3 py-2 bg-[#0d0e11] border border-white/10 rounded-lg text-sm text-white outline-none focus:border-sky-500 font-mono text-xs"
+                  placeholder="https://example.com/live/stream.m3u8" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Logo URL</label>
+                  <input value={form.logo} onChange={e => setForm(f => ({ ...f, logo: e.target.value }))}
+                    className="w-full px-3 py-2 bg-[#0d0e11] border border-white/10 rounded-lg text-sm text-white outline-none focus:border-sky-500"
+                    placeholder="https://..." />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Quốc gia (mã 2 chữ)</label>
+                  <input value={form.country} onChange={e => setForm(f => ({ ...f, country: e.target.value.toUpperCase() }))}
+                    className="w-full px-3 py-2 bg-[#0d0e11] border border-white/10 rounded-lg text-sm text-white outline-none focus:border-sky-500"
+                    placeholder="VN" maxLength={2} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Nhóm</label>
+                  <input value={form.group_name} onChange={e => setForm(f => ({ ...f, group_name: e.target.value }))}
+                    className="w-full px-3 py-2 bg-[#0d0e11] border border-white/10 rounded-lg text-sm text-white outline-none focus:border-sky-500"
+                    placeholder="News, Sports..." />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Trạng thái</label>
+                  <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
+                    className="w-full px-3 py-2 bg-[#0d0e11] border border-white/10 rounded-lg text-sm text-white outline-none focus:border-sky-500">
+                    <option value="unknown">Chưa rõ</option>
+                    <option value="online">Hoạt động</option>
+                    <option value="offline">Lỗi</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-white/5 flex items-center justify-end gap-2">
+              <button onClick={() => setShowForm(false)} className="px-4 py-2 text-sm text-slate-400 hover:text-white rounded-lg">Hủy</button>
+              <button onClick={saveChannel} disabled={saving || !form.channel_name.trim() || !form.url.trim()}
+                className="flex items-center gap-1.5 px-5 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-lg text-sm font-semibold">
+                {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                {editing ? 'Cập nhật' : 'Thêm mới'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════
-// MAIN ADMIN PANEL
+// MAIN ADMIN PANEL — REXI Harmonized Glassmorphic UI/UX 
 // ═══════════════════════════════════════════════════════════
 export default function AdminPanel({ token, currentUser, onClose }) {
-  // token and currentUser passed as props from App.jsx
-  const [activeTab, setActiveTab] = useState('users');
+  const [activeTab, setActiveTabState] = useState(() => {
+    return localStorage.getItem('rexi_admin_active_tab') || 'users';
+  });
+
+  const setActiveTab = useCallback((tab) => {
+    setActiveTabState(tab);
+    localStorage.setItem('rexi_admin_active_tab', tab);
+  }, []);
+
   const [stats, setStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
-    if (!token || !currentUser || currentUser.phan_quyen !== 'admin') { if (onClose) onClose(); else window.location.href = '/'; }
+    if (!token || !currentUser || currentUser.phan_quyen !== 'admin') { 
+      if (onClose) onClose(); 
+      else window.location.href = '/'; 
+    }
   }, []);
 
-  const showToast = (message, type = 'success') => setToast({ message, type });
+  const showToast = useCallback((message, type = 'success') => setToast({ message, type }), []);
 
   const fetchStats = useCallback(async () => {
     setStatsLoading(true);
-    try { const data = await apiFetch('/auth/stats', token); setStats(data); }
-    catch { setStats(null); }
-    finally { setStatsLoading(false); }
+    try { 
+      const data = await apiFetch('/auth/stats', token); 
+      setStats(data); 
+    } catch { 
+      setStats(null); 
+    } finally { 
+      setStatsLoading(false); 
+    }
   }, [token]);
 
-  useEffect(() => { fetchStats(); }, []);
+  useEffect(() => { fetchStats(); }, [fetchStats]);
 
   if (!token || !currentUser || currentUser.phan_quyen !== 'admin') return null;
 
-  const renderTab = () => {
+  const tabContent = useMemo(() => {
     switch (activeTab) {
-      case 'users': return <UsersTab token={token} currentUser={currentUser} showToast={showToast} stats={stats} statsLoading={statsLoading} />;
+      case 'users': return <UsersTab token={token} currentUser={currentUser} showToast={showToast} stats={stats} statsLoading={statsLoading} fetchStats={fetchStats} />;
       case 'conversations': return <ConversationsTab token={token} showToast={showToast} />;
       case 'apikeys': return <ApiKeysTab token={token} showToast={showToast} />;
       case 'skills': return <SkillsTab token={token} showToast={showToast} />;
@@ -1069,49 +1630,95 @@ export default function AdminPanel({ token, currentUser, onClose }) {
       case 'iptv': return <IptvTab token={token} showToast={showToast} />;
       case 'github': return <GitHubTrending token={token} />;
       case 'settings': return <SettingsTab token={token} showToast={showToast} />;
-      default: return <UsersTab token={token} currentUser={currentUser} showToast={showToast} stats={stats} statsLoading={statsLoading} />;
+      default: return <UsersTab token={token} currentUser={currentUser} showToast={showToast} stats={stats} statsLoading={statsLoading} fetchStats={fetchStats} />;
     }
-  };
+  }, [activeTab, token, currentUser, showToast, stats, statsLoading, fetchStats]);
 
   return (
-    <div className="flex h-full bg-[#0f1014] text-white font-sans">
-      {/* Sidebar */}
-      <aside className="flex flex-col bg-[#131417] border-r border-white/5 w-56 shrink-0">
-        <div className="p-4 border-b border-white/5">
-          <div className="flex items-center gap-2">
-            <Shield size={20} className="text-amber-400" />
-            <div><h1 className="text-sm font-bold text-amber-400">Admin Panel</h1><p className="text-[9px] text-slate-500">AI REXI Management</p></div>
+    <div className="flex h-full w-full bg-[#0b0c10] text-slate-100 font-sans relative z-10 overflow-hidden">
+      {/* Sleek Integrated Sub-Nav Sidebar */}
+      <aside className="flex flex-col bg-[#0d0e14]/90 backdrop-blur-2xl border-r border-white/8 w-52 shrink-0 transition-all duration-300">
+        <div className="p-4 border-b border-white/8 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-sm shadow-amber-500/10">
+              <Shield size={18} />
+            </div>
+            <div>
+              <h1 className="text-xs font-bold bg-gradient-to-r from-amber-300 via-amber-400 to-orange-400 bg-clip-text text-transparent">Admin Hub</h1>
+              <p className="text-[9px] text-slate-500 font-medium tracking-wide">AI REXI OS v2.0</p>
+            </div>
           </div>
         </div>
-        <nav className="flex-1 p-2 space-y-1 overflow-y-auto min-h-0">
-          {MENU_ITEMS.map(item => (
-            <button key={item.id} onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${activeTab === item.id ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
-              <item.icon size={16} className={item.color} /> {item.label}
-            </button>
-          ))}
+
+        <nav className="flex-1 p-2.5 space-y-1 overflow-y-auto scrollbar-none">
+          {MENU_ITEMS.map(item => {
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs transition-all duration-200 ${
+                  isActive
+                    ? 'bg-gradient-to-r from-cyan-500/15 via-indigo-500/15 to-purple-500/15 text-cyan-300 border border-cyan-500/30 font-bold shadow-sm shadow-cyan-500/10 translate-x-0.5'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 font-medium'
+                }`}
+              >
+                <item.icon size={16} className={isActive ? 'text-cyan-400' : item.color} />
+                <span className="truncate">{item.label}</span>
+              </button>
+            );
+          })}
         </nav>
-        <div className="p-3 border-t border-white/5">
-          <button onClick={() => onClose && onClose()} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-slate-400 hover:text-white hover:bg-white/5 transition-colors">
-            <Home size={14} /> Về trang chủ
+
+        <div className="p-3 border-t border-white/8 bg-[#0a0b0e]/60">
+          <button
+            onClick={() => onClose && onClose()}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs text-slate-400 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition-all"
+          >
+            <Home size={14} className="text-cyan-400" />
+            <span>Về trang chủ</span>
           </button>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-12 px-4 border-b border-white/5 flex items-center justify-between bg-[#131417]">
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-400">|</span>
-            <span className="text-xs text-slate-300">{MENU_ITEMS.find(m => m.id === activeTab)?.label}</span>
+      {/* Main Glassmorphism Display Area */}
+      <div className="flex-1 flex flex-col overflow-hidden bg-gradient-to-br from-[#0b0c10] via-[#0e0f17] to-[#0a0b10]">
+        <header className="h-13 px-6 border-b border-white/8 flex items-center justify-between bg-[#0d0e14]/70 backdrop-blur-xl shrink-0">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xs font-bold text-slate-400">Bảng điều khiển</span>
+            <span className="text-xs text-slate-600">/</span>
+            <span className="text-xs font-bold text-cyan-400">{MENU_ITEMS.find(m => m.id === activeTab)?.label}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-amber-400 flex items-center gap-1"><Crown size={10} /> {currentUser.ten_day_du}</span>
-            <button onClick={() => { fetchStats(); }} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400"><RefreshCw size={14} /></button>
-            {onClose && <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white"><X size={14} /></button>}
+
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-semibold">
+              <Crown size={12} className="text-amber-400" />
+              <span>{currentUser.ten_day_du}</span>
+            </div>
+
+            <button
+              onClick={() => fetchStats()}
+              title="Làm mới dữ liệu"
+              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-slate-400 hover:text-white transition-all active:scale-95"
+            >
+              <RefreshCw size={14} className={statsLoading ? 'animate-spin text-cyan-400' : ''} />
+            </button>
+
+            {onClose && (
+              <button
+                onClick={onClose}
+                title="Đóng Admin Panel"
+                className="p-2 rounded-xl bg-white/5 hover:bg-rose-500/20 border border-white/5 text-slate-400 hover:text-rose-300 transition-all active:scale-95"
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-6">{renderTab()}</main>
+
+        <main className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-white/10">
+          {tabContent}
+        </main>
       </div>
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}

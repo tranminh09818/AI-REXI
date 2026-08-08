@@ -1,4 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+// ═══════════════════════════════════════════════════════════
+// AI REXI OS - Master Web Suite (Auto-Synced & Reloaded)
+// ═══════════════════════════════════════════════════════════
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Menu, X, Send, Plus, Settings, Layers, Bot, User,
   FileText, Key, Trash2, Code2, Database, Search,
@@ -7,7 +10,8 @@ import {
   Globe, ChevronDown, Zap, MessageSquare, MoreHorizontal,
   ThumbsUp, ThumbsDown, RefreshCw, Edit3, Star, Play, ArrowUp, ArrowDown,
   Sparkles, Monitor, Sun, Moon, Tv, Eye, Code, Layout, Sliders,
-  ChevronRight, ChevronUp, Activity, Terminal, Shield, Radio, HeartPulse, Wifi, FileSpreadsheet, Presentation, LogOut, LogIn, Lock, ToggleLeft, ToggleRight, Server, GitBranch, GitCommit, EyeOff
+  ChevronRight, ChevronUp, Activity, Terminal, Shield, Radio, HeartPulse, Wifi, FileSpreadsheet, Presentation, LogOut, LogIn, Lock, ToggleLeft, ToggleRight, Server, GitBranch, GitCommit, EyeOff,
+  Video, BookOpen
 } from 'lucide-react';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
@@ -25,7 +29,9 @@ import SkillsModal from './components/SkillsModal';
 import SuperToolsModal from './components/SuperToolsModal';
 import AdminPanel from './AdminPanel';
 import StudioTab from './components/StudioTab';
+import VideoCreatorTab from './components/VideoCreatorTab';
 import BrowserView from './components/BrowserView';
+import HelpModal from './components/HelpModal';
 
 
 marked.setOptions({
@@ -36,9 +42,207 @@ marked.setOptions({
   langPrefix: 'hljs language-'
 });
 
+// Popover UI Chẩn Trận & Chọn Model Đẳng Cấp Chuyên Nghiệp (Glassmorphism & Grouped)
+const ModelSelectorPopover = ({ availableModels, modelName, setModelName, setProvider }) => {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const activeModelObj = useMemo(() => {
+    return availableModels.find(m => m.id === modelName) || {
+      id: modelName || 'gemini-2.5-flash',
+      name: modelName || 'Gemini 2.5 Flash',
+      provider: 'gemini',
+      type: 'free'
+    };
+  }, [availableModels, modelName]);
+
+  const groupedModels = useMemo(() => {
+    const map = {};
+    const filtered = availableModels.filter(m => {
+      const query = search.toLowerCase().trim();
+      if (!query) return true;
+      return (m.name || '').toLowerCase().includes(query) ||
+             (m.id || '').toLowerCase().includes(query) ||
+             (m.provider || '').toLowerCase().includes(query);
+    });
+
+    filtered.forEach(m => {
+      const pKey = (m.providerName || m.provider || 'AI Provider').toUpperCase();
+      if (!map[pKey]) map[pKey] = [];
+      map[pKey].push(m);
+    });
+    return map;
+  }, [availableModels, search]);
+
+  const selectModel = (m) => {
+    setModelName(m.id);
+    localStorage.setItem('rexi_model', m.id);
+    if (m.provider) {
+      setProvider(m.provider);
+      localStorage.setItem('rexi_provider', m.provider);
+    }
+    setOpen(false);
+  };
+
+  const getProviderBadge = (providerName) => {
+    const p = (providerName || '').toLowerCase();
+    if (p.includes('gemini') || p.includes('google')) return { bg: 'bg-blue-500/10 border-blue-500/30 text-blue-400', icon: '🤖' };
+    if (p.includes('groq')) return { bg: 'bg-amber-500/10 border-amber-500/30 text-amber-400', icon: '⚡' };
+    if (p.includes('deepseek')) return { bg: 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400', icon: '🧠' };
+    if (p.includes('kira')) return { bg: 'bg-rose-500/10 border-rose-500/30 text-rose-400', icon: '🔑' };
+    if (p.includes('opencode')) return { bg: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400', icon: '⚙️' };
+    if (p.includes('openai') || p.includes('gpt')) return { bg: 'bg-purple-500/10 border-purple-500/30 text-purple-400', icon: '🔮' };
+    return { bg: 'bg-slate-500/10 border-slate-500/30 text-slate-300', icon: '✨' };
+  };
+
+  return (
+    <div className="relative shrink-0" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#181a20] via-[#15161c] to-[#121318] border border-cyan-500/30 hover:border-cyan-400/70 shadow-lg shadow-cyan-950/20 text-xs font-medium text-slate-200 transition-all cursor-pointer group hover:scale-[1.02] active:scale-[0.98]"
+      >
+        <span className="flex items-center gap-1.5 truncate max-w-[170px] sm:max-w-[240px]">
+          <span className="text-cyan-400 text-sm">⚡</span>
+          <span className="font-bold text-cyan-100 truncate">{activeModelObj.name || activeModelObj.id}</span>
+          <span className="px-1.5 py-0.5 text-[9px] font-extrabold rounded-md bg-cyan-500/20 text-cyan-300 uppercase border border-cyan-500/30 shrink-0">
+            {(activeModelObj.provider || 'AI').toUpperCase()}
+          </span>
+        </span>
+        <ChevronDown size={14} className={`text-slate-400 group-hover:text-cyan-300 transition-transform duration-200 ${open ? 'rotate-180 text-cyan-400' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 mt-2 w-[340px] sm:w-[380px] max-h-[460px] bg-[#12141c] border border-cyan-500/50 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.95)] z-[9999999] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
+          <div className="p-3 border-b border-white/10 bg-[#171922] flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                <Cpu size={14} className="text-cyan-400 animate-pulse" /> Chọn Mô Hình AI (Model Selector)
+              </span>
+              <span className="text-[10px] font-mono text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20">
+                {availableModels.length} Models
+              </span>
+            </div>
+            
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Tìm kiếm model hoặc provider (Gemini, Groq...)"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full bg-[#16171d] text-xs text-slate-100 pl-8 pr-3 py-1.5 rounded-xl border border-white/10 focus:border-cyan-400 outline-none placeholder:text-slate-500 transition-all"
+                autoFocus
+              />
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-2 space-y-3 custom-scrollbar">
+            {Object.keys(groupedModels).length > 0 ? (
+              Object.entries(groupedModels).map(([providerGroup, models]) => {
+                const badge = getProviderBadge(providerGroup);
+                return (
+                  <div key={providerGroup} className="space-y-1">
+                    <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      <span>{badge.icon}</span>
+                      <span className="text-slate-300">{providerGroup}</span>
+                      <span className="ml-auto text-[9px] opacity-60">({models.length})</span>
+                    </div>
+
+                    <div className="space-y-1">
+                      {models.map(m => {
+                        const isSelected = m.id === modelName;
+                        const isPro = m.type === 'pro' || m.id.includes('pro') || m.id.includes('gpt-4') || m.id.includes('sonnet');
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => selectModel(m)}
+                            className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-all ${
+                              isSelected
+                                ? 'bg-cyan-500/20 border border-cyan-500/50 text-cyan-200 font-semibold shadow-inner'
+                                : 'hover:bg-white/5 border border-transparent text-slate-300 hover:text-white'
+                            }`}
+                          >
+                            <div className="flex flex-col min-w-0 pr-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs truncate">{m.name || m.id}</span>
+                              </div>
+                              <span className="text-[10px] text-slate-500 font-mono truncate">{m.id}</span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isPro ? (
+                                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                  PRO
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                  FREE
+                                </span>
+                              )}
+
+                              {isSelected && (
+                                <Check size={14} className="text-cyan-400 font-bold ml-1" />
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="p-6 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
+                <AlertTriangle size={20} className="text-amber-400" />
+                <span>Không tìm thấy model nào phù hợp với từ khóa "{search}"</span>
+              </div>
+            )}
+          </div>
+
+          <div className="p-2 border-t border-white/10 bg-[#0e0f15] text-[10px] text-slate-400 flex items-center justify-between">
+            <span className="flex items-center gap-1"><Zap size={11} className="text-cyan-400" /> Tự động chuyển Provider</span>
+            <span className="text-cyan-400 font-mono">AI REXI OS</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Rexi Animated SVG Logo Component
 const RexiLogo = ({ className = "w-8 h-8" }) => (
   <img src="/rexi_cat_icon.png" alt="Rexi" className={`rexi-logo object-contain ${className}`} />
+);
+
+// FAB menu item (icon + label + description)
+const FabItem = ({ item, activeTab, onPick }) => (
+  <button
+    onClick={onPick}
+    className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+      activeTab === item.tab
+        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-md font-bold'
+        : 'text-slate-300 hover:text-white hover:bg-white/10'
+    }`}
+  >
+    <span className={item.color}>{item.icon}</span>
+    <div className="flex flex-col items-start whitespace-nowrap">
+      <span>{item.label}</span>
+      {item.desc && <span className="text-[9px] text-slate-500 font-normal">{item.desc}</span>}
+    </div>
+  </button>
 );
 
 const POPULAR_MODELS = [
@@ -84,6 +288,7 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [superToolsOpen, setSuperToolsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
@@ -102,7 +307,16 @@ export default function App() {
   // AI Configuration State
   const [provider, setProvider] = useState(() => localStorage.getItem('rexi_provider') || 'gemini');
   const [modelName, setModelName] = useState(() => localStorage.getItem('rexi_model') || 'gemini-3.6-flash');
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('rexi_api_key') || '');
+  const [apiKey, setApiKey] = useState(() => {
+    const saved = localStorage.getItem('rexi_api_key') || '';
+    const token = localStorage.getItem('rexi_token') || '';
+    // Tự động dọn dẹp key hỏng/key nhầm JWT token để luôn luôn tự cập nhật theo Key chuẩn của Admin từ CSDL
+    if (saved && (saved.startsWith('AQ..') || saved === token || saved.length > 200)) {
+      localStorage.removeItem('rexi_api_key');
+      return '';
+    }
+    return saved;
+  });
   const [baseUrl, setBaseUrl] = useState(() => localStorage.getItem('rexi_base_url') || '');
   const [availableModels, setAvailableModels] = useState([]); // load động từ /api/models
   const [aiSpecialty, setAiSpecialty] = useState('general');
@@ -204,23 +418,33 @@ export default function App() {
   };
 
 
-  // Fetch danh sách model động từ backend theo provider đang chọn
-  const fetchAvailableModels = async (prov) => {
+  // Fetch danh sách toàn bộ model động đang hoạt động từ backend từ TẤT CẢ nhà cung cấp
+  const fetchAvailableModels = async () => {
     try {
-      const res = await apiFetch(`${API_BASE}/models?provider=${encodeURIComponent(prov || provider)}`);
-      const data = await res.json();
+      const data = await apiFetch('/models');
       if (data.success && data.models) {
-        const arr = data.models[prov || provider] || [];
-        setAvailableModels(arr);
-        if (arr.length > 0 && !arr.find(m => m.id === modelName)) {
-          setModelName(arr[0].id);
-          localStorage.setItem('rexi_model', arr[0].id);
+        let allArr = [];
+        Object.entries(data.models).forEach(([pKey, list]) => {
+          if (Array.isArray(list)) {
+            list.forEach(m => {
+              allArr.push({ ...m, provider: m.provider || pKey });
+            });
+          }
+        });
+        setAvailableModels(allArr);
+        if (allArr.length > 0) {
+          const currentExist = allArr.find(m => m.id === modelName);
+          if (!currentExist) {
+            setModelName(allArr[0].id);
+            if (allArr[0].provider) setProvider(allArr[0].provider);
+            localStorage.setItem('rexi_model', allArr[0].id);
+          }
         }
       } else {
-        setAvailableModels(POPULAR_MODELS.filter(m => m.provider === (prov || provider)));
+        setAvailableModels([]);
       }
     } catch (e) {
-      setAvailableModels(POPULAR_MODELS.filter(m => m.provider === (prov || provider)));
+      setAvailableModels([]);
     }
   };
 
@@ -228,7 +452,7 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('');
   const [authFullName, setAuthFullName] = useState('');
 
-  // Handle Google OAuth redirect
+  // Handle Google OAuth redirect (runs in popup OR main window)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const googleToken = params.get('google_token');
@@ -242,15 +466,21 @@ export default function App() {
         localStorage.setItem('rexi_token', googleToken);
         setCurrentUser(user);
         localStorage.setItem('rexi_user', JSON.stringify(user));
-        showToast('Đăng nhập Google thành công!');
-        // Clean URL
         window.history.replaceState({}, document.title, '/');
+        // Nếu đang ở popup → đóng popup, parent sẽ detect token qua storage event
+        if (window.opener) {
+          window.close();
+        } else {
+          showToast('Đăng nhập Google thành công!');
+        }
       } catch (e) {
         console.error('[Auth] Failed to parse Google user:', e);
+        if (window.opener) window.close();
       }
     } else if (googleError) {
-      alert('Đăng nhập Google thất bại: ' + googleError);
+      if (!window.opener) alert('Đăng nhập Google thất bại: ' + googleError);
       window.history.replaceState({}, document.title, '/');
+      if (window.opener) window.close();
     }
   }, []);
 
@@ -298,10 +528,45 @@ export default function App() {
     fetchTtsVoices();
   }, []);
 
+  // Token hết hạn → xóa token cũ, mở màn hình đăng nhập để user đăng nhập lại
+  useEffect(() => {
+    const onSessionExpired = () => {
+      localStorage.removeItem('rexi_token');
+      localStorage.removeItem('rexi_user');
+      setAuthToken('');
+      setCurrentUser(null);
+      setAuthModalOpen(true);
+      showToast('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.', 'error');
+    };
+    window.addEventListener('rexi_session_expired', onSessionExpired);
+    return () => window.removeEventListener('rexi_session_expired', onSessionExpired);
+  }, []);
+
+  // Listen for token changes from Google OAuth popup
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === 'rexi_token' && e.newValue) {
+        setAuthToken(e.newValue);
+        const savedUser = localStorage.getItem('rexi_user');
+        if (savedUser) {
+          try { setCurrentUser(JSON.parse(savedUser)); } catch {}
+        }
+        showToast('Đăng nhập Google thành công!');
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', currentTheme);
     localStorage.setItem('rexi_theme', currentTheme);
   }, [currentTheme]);
+
+  // Đóng FAB menu overlay khi đổi tab
+  useEffect(() => {
+    setFabOpen(false);
+  }, [activeTab]);
 
   useEffect(() => {
     fetchConversations();
@@ -313,22 +578,34 @@ export default function App() {
     if (!currentUser) fetchGuestLimits();
   }, []);
 
-  // Khi đổi provider hoặc khi có model mới được đăng tải từ Admin Panel → load lại danh sách model ở Menu Header Trang Chủ
+  // Khi có model mới được đăng tải hoặc quét xong từ Admin Panel → load lại danh sách model ở Menu Header Trang Chủ
   useEffect(() => {
-    fetchAvailableModels(provider);
+    fetchAvailableModels();
 
-    const handleModelsPublished = (e) => {
-      const prov = e.detail?.provider || provider;
-      fetchAvailableModels(prov);
+    const handleModelsPublished = () => {
+      fetchAvailableModels();
     };
     window.addEventListener('rexi_models_published', handleModelsPublished);
     return () => window.removeEventListener('rexi_models_published', handleModelsPublished);
-  }, [provider]);
+  }, []);
+
+  // SSE: tự động cập nhật danh sách model khi backend scan xong hoặc Admin cập nhật
+  useEffect(() => {
+    const evtSource = new EventSource(`${API_BASE.replace('/api', '')}/api/models/stream`);
+    evtSource.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        console.log('[SSE] Model scan/update complete:', data);
+        fetchAvailableModels();
+      } catch (err) {}
+    };
+    evtSource.onerror = () => {};
+    return () => evtSource.close();
+  }, []);
 
   const fetchGuestLimits = async () => {
     try {
-      const res = await apiFetch(`${API_BASE}/chat/guest-limits`);
-      const data = await res.json();
+      const data = await apiFetch('/chat/guest-limits');
       if (data.success && data.limits && data.limits.messages) {
         setGuestLimits(data.limits);
       }
@@ -355,80 +632,59 @@ useEffect(() => {
 
   const fetchConversations = async () => {
     try {
-      const res = await apiFetch(`${API_BASE}/chat/conversations`, { headers: authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setConversations(data);
-        if (data.length > 0 && !activeConvId) {
-          setActiveConvId(data[0].ma_hoi_thoai);
-        }
+      const data = await apiFetch('/chat/conversations', { headers: authHeaders() });
+      setConversations(data);
+      if (data.length > 0 && !activeConvId) {
+        setActiveConvId(data[0].ma_hoi_thoai);
       }
     } catch (e) { console.log(e); }
   };
 
   const fetchMessages = async (convId) => {
     try {
-      const res = await apiFetch(`${API_BASE}/chat/conversations/${convId}/messages`, { headers: authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(data);
-      }
+      const data = await apiFetch(`/chat/conversations/${convId}/messages`, { headers: authHeaders() });
+      setMessages(data);
     } catch (e) { console.log(e); }
   };
 
   const fetchFileTree = async () => {
     try {
-      const res = await apiFetch(`${API_BASE}/workspace/files`, { headers: authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setFileTree(data);
-      }
+      const data = await apiFetch('/workspace/files', { headers: authHeaders() });
+      setFileTree(data);
     } catch (e) { console.log(e); }
   };
 
   const fetchDbSkills = async () => {
     try {
-      const res = await apiFetch(`${API_BASE}/services/skills`, { headers: authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setDbSkills(data);
-      }
+      const data = await apiFetch('/services/skills', { headers: authHeaders() });
+      setDbSkills(data);
     } catch (e) { console.log(e); }
   };
 
   const fetchGitStatus = async () => {
     try {
-      const res = await apiFetch(`${API_BASE}/chat/git/status`, { headers: authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setGitStatus(data);
-      }
+      const data = await apiFetch('/chat/git/status', { headers: authHeaders() });
+      setGitStatus(data);
     } catch (e) { console.log(e); }
   };
 
   const fetchMemories = async () => {
     try {
-      const res = await apiFetch(`${API_BASE}/chat/memory`, { headers: authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setMemories(data);
-      }
+      const data = await apiFetch('/chat/memory', { headers: authHeaders() });
+      setMemories(data);
     } catch (e) { console.log(e); }
   };
 
   const fetchIPTV = async (cat, country, search) => {
     try {
-      let url = `${API_BASE}/services/iptv/channels?`;
+      let url = '/services/iptv/channels?';
       if (country) url += `country=${country}&`;
       else if (cat) url += `category=${cat}&`;
       if (search) url += `search=${encodeURIComponent(search)}`;
-      const res = await apiFetch(url, { headers: authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.channels) {
-          setIptvChannels(data.channels);
-          if (data.channels.length > 0) setSelectedChannel(data.channels[0]);
-        }
+      const data = await apiFetch(url, { headers: authHeaders() });
+      if (data.channels) {
+        setIptvChannels(data.channels);
+        if (data.channels.length > 0) setSelectedChannel(data.channels[0]);
       }
     } catch (e) { console.log(e); }
   };
@@ -436,7 +692,8 @@ useEffect(() => {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (iptvTab === 'category') fetchIPTV(iptvCategory, null, iptvSearch);
-      else fetchIPTV(null, iptvCountry, iptvSearch);
+      else if (iptvCountry) fetchIPTV(null, iptvCountry, iptvSearch);
+      else fetchIPTV(iptvCategory || 'news', null, iptvSearch);
     }, 300);
     return () => clearTimeout(timer);
   }, [iptvSearch, iptvCategory, iptvCountry, iptvTab]);
@@ -450,15 +707,41 @@ useEffect(() => {
       // youtube: fallback handled in JSX
       return;
     }
+    // Chơi qua proxy same-origin (đã có sẵn /api/services/iptv/proxy) để
+    // video.captureStream() lấy được audio track → Phụ Đề AI hoạt động được
+    const streamUrl = `${API_BASE}/services/iptv/proxy?url=${encodeURIComponent(url)}`;
+    let fallbackTried = false;
+    const attachFallback = () => {
+      // Fallback: proxy lỗi → thử phát trực tiếp URL gốc (giữ kênh chạy như trước)
+      fallbackTried = true;
+      try { hlsRef.current?.destroy(); } catch { /* ignore */ }
+      hlsRef.current = null;
+      if (Hls.isSupported()) {
+        const fb = new Hls({ enableWorker: false });
+        fb.loadSource(url);
+        fb.attachMedia(video);
+        fb.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+        hlsRef.current = fb;
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = url;
+        video.play().catch(() => {});
+      }
+    };
     if (Hls.isSupported()) {
       const hls = new Hls({ enableWorker: false });
-      hls.loadSource(url);
+      hls.loadSource(streamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+      hls.on(Hls.Events.ERROR, (evt, data) => {
+        if (data.fatal && !fallbackTried) attachFallback();
+      });
       hlsRef.current = hls;
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = url;
+      video.src = streamUrl;
       video.play().catch(() => {});
+      video.onerror = () => {
+        if (!fallbackTried) attachFallback();
+      };
     }
   }, [iptvVideoRef, hlsRef]);
 
@@ -470,14 +753,20 @@ useEffect(() => {
     setDesktopLoading(true);
     setDesktopError(null);
     try {
-      const res = await apiFetch(`${API_BASE}/services/desktop/screenshot?t=${Date.now()}`);
+      // Dùng fetch trực tiếp vì response là ảnh blob (apiFetch parse JSON nên không dùng được)
+      const res = await fetch(`${API_BASE}/services/desktop/screenshot?t=${Date.now()}`, {
+        headers: authHeaders(),
+        credentials: 'include'
+      });
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         setDesktopScreenshot(url);
       } else {
         setDesktopScreenshot(null);
-        setDesktopError(`Server lỗi (${res.status})`);
+        setDesktopError(res.status === 401
+          ? 'Cần đăng nhập để dùng Remote Desktop.'
+          : `Lỗi chụp màn hình (${res.status}). Thử lại sau.`);
       }
     } catch (e) {
       setDesktopScreenshot(null);
@@ -487,8 +776,8 @@ useEffect(() => {
 
   const fetchGitDiff = async () => {
     try {
-      const res = await apiFetch(`${API_BASE}/chat/git/diff`, { headers: authHeaders() });
-      if (res.ok) { const d = await res.json(); setGitDiff(d.diff || ''); }
+      const d = await apiFetch('/chat/git/diff', { headers: authHeaders() });
+      setGitDiff(d.diff || '');
     } catch(e) {}
   };
 
@@ -503,27 +792,22 @@ useEffect(() => {
       return; // Đã có cuộc trò chuyện trống, không tạo thêm
     }
     try {
-      const res = await apiFetch(`${API_BASE}/chat/conversations`, {
+      const data = await apiFetch('/chat/conversations', {
         method: 'POST',
         body: JSON.stringify({ tieu_de: 'Trò chuyện mới', ten_mo_hinh_ai: modelName })
       });
-      if (res.ok) {
-        const data = await res.json();
-        setConversations(prev => [data, ...prev]);
-        setActiveConvId(data.ma_hoi_thoai);
-        setMessages([]);
-      }
+      setConversations(prev => [data, ...prev]);
+      setActiveConvId(data.ma_hoi_thoai);
+      setMessages([]);
     } catch (e) { console.error(e); }
   };
 
   const handleDeleteConversation = async (id, e) => {
     e.stopPropagation();
     try {
-      const res = await apiFetch(`${API_BASE}/chat/conversations/${id}`, { method: 'DELETE', headers: authHeaders() });
-      if (res.ok) {
-        setConversations(prev => prev.filter(c => c.ma_hoi_thoai !== id));
-        if (activeConvId === id) setActiveConvId(null);
-      }
+      await apiFetch(`/chat/conversations/${id}`, { method: 'DELETE', headers: authHeaders() });
+      setConversations(prev => prev.filter(c => c.ma_hoi_thoai !== id));
+      if (activeConvId === id) setActiveConvId(null);
     } catch (e) { console.error(e); }
   };
 
@@ -557,15 +841,19 @@ useEffect(() => {
 
     let convId = activeConvId;
     if (!convId) {
-      const res = await apiFetch(`${API_BASE}/chat/conversations`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ tieu_de: text.replace(/!\[.*?\]\(.*?\)/g, '').substring(0, 30), ten_mo_hinh_ai: modelName })
-      });
-      const data = await res.json();
-      convId = data.ma_hoi_thoai;
-      setActiveConvId(convId);
-      setConversations(prev => [data, ...prev]);
+      try {
+        const data = await apiFetch('/chat/conversations', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ tieu_de: text.replace(/!\[.*?\]\(.*?\)/g, '').substring(0, 30), ten_mo_hinh_ai: modelName })
+        });
+        convId = data.ma_hoi_thoai;
+        setActiveConvId(convId);
+        setConversations(prev => [data, ...prev]);
+      } catch (e) {
+        console.error('[Chat] Không tạo được hội thoại:', e);
+        convId = null;
+      }
     }
 
     // Double-check: nếu vẫn chưa có convId (có thể do race condition), báo lỗi thay vì gửi vào path rỗng
@@ -588,9 +876,11 @@ useEffect(() => {
     const streamMsgId = 'stream_' + Date.now();
 
     try {
-      const res = await apiFetch(`${API_BASE}/chat/conversations/${convId}/messages/stream`, {
+      // Dùng fetch trực tiếp (không qua apiFetch) vì cần đọc SSE stream từ Response
+      const res = await fetch(`${API_BASE}/chat/conversations/${convId}/messages/stream`, {
         method: 'POST',
         headers: authHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           vai_tro: 'user',
           noi_dung: text,
@@ -614,6 +904,11 @@ useEffect(() => {
       // Guest limit / yêu cầu đăng nhập (401) — middleware trả JSON
       if (res.status === 401) {
         const errorData = await res.json().catch(() => ({}));
+        // Token không hợp lệ / hết hạn → xóa token cũ + mở lại màn hình đăng nhập
+        if (errorData.code === 'INVALID_TOKEN') {
+          window.dispatchEvent(new CustomEvent('rexi_session_expired', { detail: errorData.error }));
+          return;
+        }
         if (errorData.code === 'LOGIN_REQUIRED' || errorData.code === 'AGENT_LIMIT_REACHED') {
           const isAgentLimit = errorData.code === 'AGENT_LIMIT_REACHED';
           setMessages(prev => [...prev.filter(m => m.ma_tin_nhan !== tempUserMsg.ma_tin_nhan), tempUserMsg, {
@@ -674,10 +969,18 @@ useEffect(() => {
         }
       }
 
-      // Cập nhật ma_tin_nhan cuối (khớp DB) + làm sạch thông báo lỗi hệ thống
+      // Cập nhật ma_tin_nhan cuối (khớp DB) + làm sạch thông báo lỗi hệ thống & suy luận nháp
       setMessages(prev => prev.map(m => {
         if (m.ma_tin_nhan !== streamMsgId) return m;
         let finalText = aiText;
+        if (finalText && /Here'?s a thinking process:/i.test(finalText)) {
+          const finalMatch = finalText.match(/(?:Output matches draft|Final Output|Output):\s*([✅\s\S]+)$/i);
+          if (finalMatch && finalMatch[1]) finalText = finalMatch[1].replace(/^[✅\s]+/, '').trim();
+          else {
+            const draftMatch = finalText.match(/Draft:\s*"([^"]+)"/i);
+            if (draftMatch && draftMatch[1]) finalText = draftMatch[1].trim();
+          }
+        }
         if (finalText && (finalText.includes('The filename, directory name') || finalText.includes('syntax is incorrect'))) {
           finalText = `Xin chào **${currentUser?.ten_day_du || 'USER'}**! Tôi là **AI Rexi Assistant**.\n\nHệ thống đã sẵn sàng 100% với bộ **35+ Skills Agent**, Quản Lý Files Workspace, Live IPTV & Remote Desktop Control. Bạn muốn tôi làm gì giúp bạn?`;
         }
@@ -700,7 +1003,17 @@ useEffect(() => {
     }
   };
 
+  const recognitionRef = useRef(null);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+
   const startVoice = async () => {
+    // Nếu đang nghe → bấm lại để DỪNG
+    if (listening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setListening(false);
+      showToast('Đã dừng ghi âm — chữ đã vào ô chat, bấm gửi nhé!', 'info');
+      return;
+    }
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
       alert("Trình duyệt không hỗ trợ Web Speech API.");
       return;
@@ -709,12 +1022,36 @@ useEffect(() => {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       const r = new SR();
+      recognitionRef.current = r;
       r.lang = 'vi-VN';
       r.interimResults = true;
-      r.onstart = () => setListening(true);
-      r.onend = () => setListening(false);
-      r.onerror = () => setListening(false);
-      r.onresult = (e) => setInputText(Array.from(e.results).map(x => x[0].transcript).join(''));
+      r.continuous = true;
+      // Dùng biến local để tránh stale-closure khi đọc transcript trong onend
+      let recognizedText = '';
+      r.onstart = () => { setListening(true); setVoiceTranscript(''); };
+      r.onend = () => {
+        setListening(false);
+        recognitionRef.current = null;
+        if (recognizedText && recognizedText.trim()) {
+          showToast('🎙️ Đã chuyển giọng nói thành chữ — bấm gửi nhé!', 'info');
+        }
+        setVoiceTranscript('');
+      };
+      r.onerror = (e) => {
+        if (e.error === 'not-allowed') alert("Cấp quyền Micro cho trình duyệt để sử dụng.");
+        setListening(false);
+        recognitionRef.current = null;
+        setVoiceTranscript('');
+      };
+      r.onresult = (e) => {
+        let text = '';
+        for (let i = 0; i < e.results.length; i++) {
+          text += e.results[i][0].transcript;
+        }
+        recognizedText = text;
+        setVoiceTranscript(text);
+        setInputText(text);
+      };
       r.start();
     } catch { alert("Cấp quyền Micro cho trình duyệt để sử dụng."); }
   };
@@ -737,7 +1074,7 @@ useEffect(() => {
       window.speechSynthesis.cancel();
     }
 
-    const useServerTTS = ttsUsingServer && authToken && cleanText.length <= 1000;
+    const useServerTTS = ttsUsingServer && cleanText.length <= 2000;
 
     if (useServerTTS) {
       // Dùng Backend TTS (edge-tts, chất lượng cao)
@@ -758,8 +1095,12 @@ useEffect(() => {
         .then(data => {
           if (data.success && data.audio) {
             const audio = new Audio('data:audio/mp3;base64,' + data.audio);
-            audio.play();
+            audio.play().catch(e => {
+              console.warn('[Audio Play Error]:', e.message);
+              setSpeakingMsgId(null);
+            });
             audio.onended = () => setSpeakingMsgId(null);
+            audio.onerror = () => setSpeakingMsgId(null);
           } else {
             throw new Error(data.error || 'TTS server failed');
           }
@@ -826,13 +1167,10 @@ useEffect(() => {
 
   const handleOpenFile = async (fileRelPath) => {
     try {
-      const res = await apiFetch(`${API_BASE}/workspace/file-content?path=${encodeURIComponent(fileRelPath)}`, { headers: authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedFile(fileRelPath);
-        setFileContent(data.content);
-        handleSetActiveTab('code');
-      }
+      const data = await apiFetch(`/workspace/file-content?path=${encodeURIComponent(fileRelPath)}`, { headers: authHeaders() });
+      setSelectedFile(fileRelPath);
+      setFileContent(data.content);
+      handleSetActiveTab('code');
     } catch (e) { console.error(e); }
   };
 
@@ -840,12 +1178,11 @@ useEffect(() => {
     if (!selectedFile) return;
     setSavingFile(true);
     try {
-      const response = await apiFetch(`${API_BASE}/workspace/file-content`, {
+      await apiFetch('/workspace/file-content', {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: selectedFile, content: fileContent })
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       alert('Đã lưu tệp tin thành công!');
     } catch (e) { alert('Lỗi lưu file: ' + e.message); }
     finally { setSavingFile(false); }
@@ -854,12 +1191,11 @@ useEffect(() => {
   const handleExecCommand = async () => {
     if (!execCommand.trim()) return;
     try {
-      const res = await apiFetch(`${API_BASE}/chat/exec`, {
+      const data = await apiFetch('/chat/exec', {
         method: 'POST',
         headers: { ...authHeaders(), 'X-Exec-Confirm': 'yes' },
         body: JSON.stringify({ command: execCommand })
       });
-      const data = await res.json();
       setExecOutput(data.stdout || data.stderr || data.error || 'Thực thi thành công.');
     } catch (e) { setExecOutput('Lỗi thực thi: ' + e.message); }
   };
@@ -867,7 +1203,7 @@ useEffect(() => {
   const handleAddMemory = async () => {
     if (!newMemory.trim()) return;
     try {
-      await apiFetch(`${API_BASE}/chat/memory`, {
+      await apiFetch('/chat/memory', {
         method: 'POST',
         body: JSON.stringify({ loai: 'thong_tin_user', noi_dung: newMemory })
       });
@@ -878,24 +1214,23 @@ useEffect(() => {
 
   const handleDeleteMemory = async (memId) => {
     try {
-      await apiFetch(`${API_BASE}/chat/memory/${memId}`, { method: 'DELETE' });
+      await apiFetch(`/chat/memory/${memId}`, { method: 'DELETE' });
       setMemories(prev => prev.filter(m => m.ma_bo_nho !== memId));
     } catch (e) { console.error(e); }
   };
 
   const handleAuthSubmit = async () => {
     try {
-      const endpoint = authMode === 'login' ? `${API_BASE}/auth/login` : `${API_BASE}/auth/register`;
+      const endpoint = authMode === 'login' ? '/auth/login' : '/auth/register';
       const body = authMode === 'login'
         ? { email: authEmail, password: authPassword }
         : { email: authEmail, password: authPassword, ten_day_du: authFullName };
 
-      const res = await apiFetch(endpoint, {
+      const data = await apiFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      const data = await res.json();
 
       if (data.success && data.token) {
         setAuthToken(data.token);
@@ -913,7 +1248,10 @@ useEffect(() => {
       }
     } catch (e) {
       console.error('[Auth] Login failed:', e);
-      alert('Không thể kết nối đến máy chủ. Vui lòng kiểm tra mạng hoặc khởi động lại server AI Rexi.');
+      // Nếu server trả lỗi cụ thể (vd sai mật khẩu) thì hiện lỗi đó thay vì thông báo chung
+      alert(e.message && !e.message.includes('HTTP')
+        ? e.message
+        : 'Không thể kết nối đến máy chủ. Vui lòng kiểm tra mạng hoặc khởi động lại server AI Rexi.');
     }
   };
 
@@ -953,52 +1291,36 @@ useEffect(() => {
     }
   };
 
-  // Open Google OAuth popup
+  // Open Google OAuth popup → backend callback redirects popup to localhost:5173?google_token=...
+  // Parent window detects token via storage event listener (useEffect above)
   const openGoogleOAuth = () => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    const redirectUri = 'http://localhost:5000/api/auth/google/callback';
+    if (!clientId) {
+      alert('Google Client ID chưa cấu hình. Vui lòng thêm VITE_GOOGLE_CLIENT_ID vào file .env');
+      return;
+    }
+    const redirectUri = `${window.location.origin}/api/auth/google/callback`;
     const scope = 'email profile';
     
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
-      scope: scope,
+      scope,
       prompt: 'select_account',
       access_type: 'offline'
     });
     
     const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
-    
-    // Open popup
     const width = 500, height = 600;
     const left = (screen.width - width) / 2;
     const top = (screen.height - height) / 2;
     
-    const popup = window.open(
+    window.open(
       googleAuthUrl,
       'google_oauth',
       `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`
     );
-    
-    // Listen for message from popup
-    const handleMessage = (event) => {
-      if (event.data && event.data.credential) {
-        handleGoogleSignIn({ credential: event.data.credential });
-        window.removeEventListener('message', handleMessage);
-        popup.close();
-      }
-    };
-    
-    window.addEventListener('message', handleMessage);
-    
-    // Fallback: check if popup closed
-    const checkPopup = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(checkPopup);
-        window.removeEventListener('message', handleMessage);
-      }
-    }, 1000);
   };
 
 
@@ -1042,7 +1364,7 @@ useEffect(() => {
         handleDeleteConversation={handleDeleteConversation}
         filesDrawerOpen={filesDrawerOpen} setFilesDrawerOpen={setFilesDrawerOpen}
         renderTree={renderTree} fileTree={fileTree}
-         setSkillsOpen={setSkillsOpen} setSuperToolsOpen={setSuperToolsOpen}
+         setSkillsOpen={setSkillsOpen} setSuperToolsOpen={setSuperToolsOpen} setHelpOpen={setHelpOpen}
         currentUser={currentUser} setCurrentUser={setCurrentUser} setAuthToken={setAuthToken}
         setAuthModalOpen={setAuthModalOpen} setSettingsOpen={setSettingsOpen} setAdminOpen={setAdminOpen}
         apiFetch={apiFetch} API_BASE={API_BASE} showToast={showToast} setConversations={setConversations}
@@ -1078,8 +1400,9 @@ useEffect(() => {
           </div>
         )}
 
-        {/* Top Header Bar */}
-        <header className="min-h-14 py-2 px-3 border-b border-white/5 flex flex-wrap items-center justify-between gap-2 bg-[var(--bg-sidebar)] backdrop-blur-md">
+        {/* Top Header Bar (Hiển thị ở mọi tab, trừ Browser) */}
+        {activeTab !== 'browser' && (
+        <header className="relative z-50 min-h-14 py-2 px-3 border-b border-white/5 flex flex-wrap items-center justify-between gap-2 bg-[var(--bg-sidebar)] backdrop-blur-md">
           <div className="flex items-center gap-2 flex-wrap min-w-0">
             {!sidebarOpen && (
               <button
@@ -1092,20 +1415,12 @@ useEffect(() => {
 
             {/* Model & Specialty Selectors */}
             <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-              <select
-                value={modelName}
-                onChange={e => {
-                  setModelName(e.target.value);
-                  localStorage.setItem('rexi_model', e.target.value);
-                }}
-                className="bg-[#131417] text-[11px] font-medium text-cyan-300 border border-cyan-500/30 rounded-xl px-2.5 py-1.5 outline-none cursor-pointer hover:border-cyan-400 transition-all shrink-0 max-w-[150px] sm:max-w-none"
-              >
-                {(availableModels.length > 0 ? availableModels : POPULAR_MODELS).map(m => (
-                  <option key={m.id} value={m.id} className="bg-[#1e1f20] text-slate-200">
-                    {m.name}{m.label ? ` (${m.label})` : m.type ? ` [${m.type}]` : ''}
-                  </option>
-                ))}
-              </select>
+              <ModelSelectorPopover
+                availableModels={availableModels}
+                modelName={modelName}
+                setModelName={setModelName}
+                setProvider={setProvider}
+              />
 
               <select
                 value={aiSpecialty}
@@ -1187,9 +1502,11 @@ useEffect(() => {
               <option value="catppuccin">🐱 Catppuccin</option>
               <option value="cyberpunk">⚡ Cyberpunk</option>
               <option value="nord">❄️ Nord</option>
+              <option value="light">☀️ Light</option>
             </select>
           </div>
         </header>
+        )}
 
         {/* Tab Router Content */}
         <div className="flex-1 overflow-hidden relative">
@@ -1201,7 +1518,7 @@ useEffect(() => {
               loading={loading} attachedFiles={attachedFiles}
               executionMode={executionMode} setExecutionMode={setExecutionMode}
               chatModeOpen={chatModeOpen} setChatModeOpen={setChatModeOpen}
-              listening={listening} copiedId={copiedId} speakingMsgId={speakingMsgId}
+              listening={listening} voiceTranscript={voiceTranscript} copiedId={copiedId} speakingMsgId={speakingMsgId}
                handleSendMessage={handleSendMessage} startVoice={startVoice}
                speakText={speakText} copyToClipboard={copyToClipboard}
                ttsUsingServer={ttsUsingServer}
@@ -1210,6 +1527,7 @@ useEffect(() => {
               showScrollTop={showScrollTop} showScrollBottom={showScrollBottom}
               scrollToTopSmooth={scrollToTopSmooth} scrollToBottomSmooth={scrollToBottomSmooth}
               currentUser={currentUser}
+              onOpenFeature={handleSetActiveTab}
             />
           )}
 
@@ -1237,9 +1555,18 @@ useEffect(() => {
             />
           )}
 
-          {/* TAB 5: VIDEO & AUDIO STUDIO */}
-          {activeTab === 'studio' && (
+          {/* TAB 5a: TTS STUDIO */}
+          {activeTab === 'tts' && (
             <StudioTab
+              API_BASE={API_BASE}
+              authToken={authToken}
+              showToast={showToast}
+            />
+          )}
+
+          {/* TAB 5b: VIDEO CREATOR */}
+          {activeTab === 'video' && (
+            <VideoCreatorTab
               API_BASE={API_BASE}
               authToken={authToken}
               showToast={showToast}
@@ -1273,7 +1600,7 @@ useEffect(() => {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const xPct = ((e.clientX - rect.left) / rect.width).toFixed(4);
                   const yPct = ((e.clientY - rect.top) / rect.height).toFixed(4);
-                  await apiFetch(`${API_BASE}/services/desktop/click`, {
+                  await apiFetch('/services/desktop/click', {
                     method: 'POST', headers: authHeaders(),
                     body: JSON.stringify({ x_percent: parseFloat(xPct), y_percent: parseFloat(yPct) })
                   });
@@ -1405,7 +1732,7 @@ useEffect(() => {
                       <span className="flex-1 text-slate-300">{m.noi_dung}</span>
                       <button
                         onClick={async () => {
-                          await apiFetch(`${API_BASE}/chat/memory/${m.ma_bo_nho}`, { method: 'DELETE', headers: authHeaders() });
+                          await apiFetch(`/chat/memory/${m.ma_bo_nho}`, { method: 'DELETE', headers: authHeaders() });
                           fetchMemories();
                         }}
                         className="opacity-0 group-hover:opacity-100 text-rose-400 hover:text-rose-300 shrink-0"
@@ -1442,11 +1769,10 @@ useEffect(() => {
                 {forgotMessage && <p className="text-xs text-cyan-300 text-center">{forgotMessage}</p>}
                 <button type="button" onClick={async () => {
                   try {
-                    const res = await apiFetch(`${API_BASE}/auth/forgot-password`, {
+                    const data = await apiFetch('/auth/forgot-password', {
                       method: 'POST', headers: {'Content-Type': 'application/json'},
                       body: JSON.stringify({ account: authEmail })
                     });
-                    const data = await res.json();
                     if (data.success) {
                       setForgotMessage(data.otp_debug ? `Mã OTP local: ${data.otp_debug}` : data.message);
                       setForgotStep('reset');
@@ -1472,11 +1798,10 @@ useEffect(() => {
                 </div>
                 <button type="button" onClick={async () => {
                   try {
-                    const res = await apiFetch(`${API_BASE}/auth/reset-password`, {
+                    const data = await apiFetch('/auth/reset-password', {
                       method: 'POST', headers: {'Content-Type': 'application/json'},
                       body: JSON.stringify({ account: authEmail, otp_code: forgotOtp, new_password: forgotNewPassword })
                     });
-                    const data = await res.json();
                     if (data.success) {
                       setForgotMessage('Đặt lại mật khẩu thành công. Bạn có thể đăng nhập.');
                       setAuthPassword('');
@@ -1580,103 +1905,124 @@ useEffect(() => {
         baseUrl={baseUrl} setBaseUrl={setBaseUrl}
       />
 
-      {/* ═══════════════════ FLOATING SPEED DIAL MENU (Góc dưới bên phải) ═══════════════════ */}
-      {/* Overlay click outside để tự thu lại menu khi bấm ra ngoài */}
-      {fabOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px] transition-opacity duration-300"
-          onClick={() => setFabOpen(false)}
-        />
+      {/* ═══════════════════ FLOATING SPEED DIAL MENU (Chỉ hiện ở tab thường, ẩn hoàn toàn ở Admin) ═══════════════════ */}
+      {activeTab !== 'admin' && (
+        <>
+          {fabOpen && (
+            <div
+              className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px] transition-opacity duration-300"
+              onClick={() => setFabOpen(false)}
+            />
+          )}
+
+          <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 pointer-events-none">
+            {/* Danh sách các công cụ hiện lên khi bấm mở (Có hỗ trợ cuộn nếu có nhiều tính năng) */}
+            <div className={`
+              flex flex-col gap-2 p-2 bg-[#181922]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl transition-all duration-300 origin-bottom-right
+              max-h-[70vh] overflow-y-auto pr-1.5 scrollbar-thin
+              ${fabOpen
+                ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto shadow-cyan-500/10'
+                : 'opacity-0 scale-75 translate-y-6 pointer-events-none'
+              }
+            `}>
+              {/* Nhóm AI */}
+              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-600 px-3 pt-1 pb-1">🧠 Trí Tuệ AI</p>
+              {[
+                { tab: 'chat', icon: <MessageSquare size={17} />, label: 'Chat AI', color: 'text-cyan-400', desc: 'Trò chuyện với AI' },
+                { tab: 'code', icon: <Code size={17} />, label: 'Editor & Preview', color: 'text-blue-400', desc: 'Code + xem trước HTML' },
+                { tab: 'browser', icon: <Bot size={17} />, label: 'Browser Agent', color: 'text-purple-400', desc: 'AI điều khiển trình duyệt' },
+              ].map(item => (
+                <FabItem key={item.tab} item={item} activeTab={activeTab} onPick={() => { handleSetActiveTab(item.tab); setFabOpen(false); }} />
+              ))}
+
+              {/* Nhóm Sáng Tạo */}
+              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-600 px-3 pt-2 pb-1">🎨 Sáng Tạo</p>
+              {[
+                { tab: 'tts', icon: <Mic size={17} />, label: 'TTS Studio', color: 'text-cyan-400', desc: 'Chữ → giọng nói MP3' },
+                { tab: 'video', icon: <Video size={17} />, label: 'Video Creator', color: 'text-purple-400', desc: 'Tạo video từ mẫu' },
+              ].map(item => (
+                <FabItem key={item.tab} item={item} activeTab={activeTab} onPick={() => { handleSetActiveTab(item.tab); setFabOpen(false); }} />
+              ))}
+
+              {/* Nhóm Giải Trí & Hệ Thống */}
+              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-600 px-3 pt-2 pb-1">📺 Giải Trí & Hệ Thống</p>
+              {[
+                { tab: 'iptv', icon: <Tv size={17} />, label: 'IPTV Truyền Hình', color: 'text-rose-400', desc: 'Xem TV trực tuyến' },
+                { tab: 'files', icon: <Folder size={17} />, label: 'Workspace Files', color: 'text-amber-400', desc: 'Quản lý file dự án' },
+                { tab: 'desktop', icon: <Monitor size={17} />, label: 'Remote Desktop', color: 'text-emerald-400', desc: 'Điều khiển màn hình' },
+                ...(currentUser?.phan_quyen === 'admin' ? [{ tab: 'admin', icon: <Shield size={17} />, label: 'Quản Trị Viên', color: 'text-amber-400', desc: 'Bảng điều khiển admin' }] : []),
+              ].map(item => (
+                <FabItem key={item.tab} item={item} activeTab={activeTab} onPick={() => { handleSetActiveTab(item.tab); setFabOpen(false); }} />
+              ))}
+
+              {/* Trợ giúp */}
+              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-600 px-3 pt-2 pb-1">❓ Trợ Giúp</p>
+              <button
+                onClick={() => { setHelpOpen(true); setFabOpen(false); }}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all text-slate-300 hover:text-white hover:bg-white/10"
+              >
+                <span className="text-sky-400"><BookOpen size={17} /></span>
+                <div className="flex flex-col items-start whitespace-nowrap">
+                  <span>Hướng Dẫn Sử Dụng</span>
+                  <span className="text-[9px] text-slate-500">Học cách dùng mọi tính năng</span>
+                </div>
+              </button>
+
+              {/* Đường phân cách */}
+              <div className="h-px bg-white/10 my-0.5 mx-2" />
+
+              {/* Nhóm Quick Tools (Modals) */}
+              <button
+                onClick={() => { setSkillsOpen(true); setFabOpen(false); }}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-purple-300 hover:text-white hover:bg-purple-500/20 transition-all"
+              >
+                <Layers size={17} className="text-purple-400" />
+                <span className="whitespace-nowrap">35+ Agent Skills</span>
+              </button>
+
+              <button
+                onClick={() => { setSuperToolsOpen(true); setFabOpen(false); }}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-amber-300 hover:text-white hover:bg-amber-500/20 transition-all"
+              >
+                <Zap size={17} className="text-amber-400" />
+                <span className="whitespace-nowrap">Super Tools (CLI/Git)</span>
+              </button>
+
+              <button
+                onClick={() => { setSettingsOpen(true); setFabOpen(false); }}
+                className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-white/10 transition-all"
+              >
+                <Settings size={17} className="text-slate-400" />
+                <span className="whitespace-nowrap">Cài Đặt Hệ Thống</span>
+              </button>
+            </div>
+
+            {/* Nút FAB chính chỉ mũi tên lên/xuống kèm animation xoay */}
+            <button
+              onClick={() => setFabOpen(!fabOpen)}
+              className={`
+                pointer-events-auto w-[52px] h-[52px] p-3.5 rounded-2xl flex items-center justify-center shadow-2xl transition-all duration-300
+                ${fabOpen
+                  ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30 rotate-180'
+                  : 'bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white shadow-cyan-500/30'
+                }
+              `}
+              title={fabOpen ? 'Thu gọn menu' : 'Mở thanh công cụ nhanh'}
+            >
+              <ChevronUp size={24} className={`transition-transform duration-300 ${fabOpen ? 'rotate-180' : ''}`} />
+            </button>
+          </div>
+        </>
       )}
 
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
-        {/* Danh sách các công cụ hiện lên khi bấm mở (Có hỗ trợ cuộn nếu có nhiều tính năng) */}
-        <div className={`
-          flex flex-col gap-2 p-2 bg-[#181922]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl transition-all duration-300 origin-bottom-right
-          max-h-[70vh] overflow-y-auto pr-1.5 scrollbar-thin
-          ${fabOpen
-            ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto shadow-cyan-500/10'
-            : 'opacity-0 scale-75 translate-y-6 pointer-events-none'
-          }
-        `}>
-          {/* Nhóm Main Tabs */}
-          {[
-            { tab: 'chat', icon: <MessageSquare size={17} />, label: 'Chat AI', color: 'text-cyan-400' },
-            { tab: 'code', icon: <Code size={17} />, label: 'Editor & Preview', color: 'text-blue-400' },
-            { tab: 'files', icon: <Folder size={17} />, label: 'Workspace Files', color: 'text-amber-400' },
-             { tab: 'iptv', icon: <Tv size={17} />, label: 'IPTV Truyền Hình', color: 'text-rose-400' },
-            { tab: 'studio', icon: <Play size={17} />, label: 'Video & Audio Studio', color: 'text-purple-400' },
-            { tab: 'desktop', icon: <Monitor size={17} />, label: 'Remote Desktop', color: 'text-emerald-400' },
-            { tab: 'browser', icon: <Bot size={17} />, label: 'Browser Agent', color: 'text-purple-400' },
-            ...(currentUser?.phan_quyen === 'admin' ? [{ tab: 'admin', icon: <Shield size={17} />, label: 'Quản Trị Viên', color: 'text-amber-400' }] : []),
-          ].map(item => (
-            <button
-              key={item.tab}
-              onClick={() => {
-                handleSetActiveTab(item.tab);
-                setFabOpen(false); // Tự thu lại khi chọn
-              }}
-              className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-                activeTab === item.tab
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-md font-bold'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
-              }`}
-            >
-              <span className={item.color}>{item.icon}</span>
-              <span className="whitespace-nowrap">{item.label}</span>
-            </button>
-          ))}
-
-          {/* Đường phân cách */}
-          <div className="h-px bg-white/10 my-0.5 mx-2" />
-
-          {/* Nhóm Quick Tools (Modals) */}
-          <button
-            onClick={() => { setSkillsOpen(true); setFabOpen(false); }}
-            className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-purple-300 hover:text-white hover:bg-purple-500/20 transition-all"
-          >
-            <Layers size={17} className="text-purple-400" />
-            <span className="whitespace-nowrap">35+ Agent Skills</span>
-          </button>
-
-          <button
-            onClick={() => { setSuperToolsOpen(true); setFabOpen(false); }}
-            className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-amber-300 hover:text-white hover:bg-amber-500/20 transition-all"
-          >
-            <Zap size={17} className="text-amber-400" />
-            <span className="whitespace-nowrap">Super Tools (CLI/Git)</span>
-          </button>
-
-          <button
-            onClick={() => { setSettingsOpen(true); setFabOpen(false); }}
-            className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-white/10 transition-all"
-          >
-            <Settings size={17} className="text-slate-400" />
-            <span className="whitespace-nowrap">Cài Đặt Hệ Thống</span>
-          </button>
-        </div>
-
-        {/* Nút FAB chính chỉ mũi tên lên/xuống kèm animation xoay */}
-        <button
-          onClick={() => setFabOpen(!fabOpen)}
-          className={`
-            w-[52px] h-[52px] p-3.5 rounded-2xl flex items-center justify-center shadow-2xl transition-all duration-300
-            ${fabOpen
-              ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30 rotate-180'
-              : 'bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white shadow-cyan-500/30'
-            }
-          `}
-          title={fabOpen ? 'Thu gọn menu' : 'Mở thanh công cụ nhanh'}
-        >
-          <ChevronUp size={24} className={`transition-transform duration-300 ${fabOpen ? 'rotate-180' : ''}`} />
-        </button>
-      </div>
+      {/* ═══════════════════ HELP MODAL (HƯỚNG DẪN SỬ DỤNG) ═══════════════════ */}
+      <HelpModal helpOpen={helpOpen} setHelpOpen={setHelpOpen} />
 
       {/* Toast Notification */}
       {toastMsg && (
         <div className={"fixed bottom-6 right-6 z-[9999] px-4 py-3 rounded-xl shadow-2xl backdrop-blur-md border flex items-center gap-3 text-sm font-medium transition-all duration-300 animate-slide-up " + (toastType === 'success' ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-200' : toastType === 'error' ? 'bg-rose-500/20 border-rose-500/30 text-rose-200' : 'bg-cyan-500/20 border-cyan-500/30 text-cyan-200')}>
           <span>{toastType === 'success' ? '✅' : toastType === 'error' ? '❌' : 'ℹ️'}</span>
-          <span>{toastMsg}</span>
+          <span className="max-w-[440px] overflow-hidden text-ellipsis whitespace-nowrap">{toastMsg}</span>
           <button onClick={() => setToastMsg('')} className="ml-2 opacity-60 hover:opacity-100 transition-opacity">\u00D7</button>
         </div>
       )}

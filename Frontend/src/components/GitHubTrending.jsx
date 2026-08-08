@@ -128,9 +128,26 @@ function RepoCard({ repo, index, isStarred, onStarRepo, starringKey, speakingKey
               </span>
             )}
 
-            {/* Total Stars */}
+            {/* Total Stars — icon ★ clickable to star/unstar */}
             <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
-              <Star size={11} className="text-amber-400" />
+              <button
+                onClick={() => onStarRepo(repo)}
+                disabled={starringKey === repo.full_name}
+                title={isStarred ? 'Bỏ star' : 'Star repo này'}
+                className={`p-0.5 rounded transition-all ${
+                  isStarred
+                    ? 'text-yellow-300 hover:text-yellow-200'
+                    : 'text-amber-400 hover:text-yellow-300'
+                }`}
+              >
+                {starringKey === repo.full_name ? (
+                  <RefreshCw size={11} className="animate-spin" />
+                ) : isStarred ? (
+                  <Star size={11} className="fill-yellow-400" />
+                ) : (
+                  <Star size={11} />
+                )}
+              </button>
               {formatNumber(repo.stars)}
             </span>
 
@@ -571,7 +588,42 @@ export default function GitHubTrending({ token }) {
     }
   };
 
-  useEffect(() => { fetchTrending(); }, [fetchTrending]);
+  // Fetch all starred repos from GitHub — phải khai báo TRƯỚC useEffect dùng nó
+  const fetchGithubStarred = useCallback(async () => {
+    try {
+      const data = await apiFetch('/admin/github/starred', token);
+      if (data.success) setGithubStarred(data.repos || []);
+    } catch { /* ignore */ }
+  }, [token]);
+
+  // Check which repos are starred on GitHub (batch check top repos)
+  const fetchStarredStatus = useCallback(async (repoList) => {
+    if (!repoList || repoList.length === 0) return;
+    try {
+      // Chỉ check top 10 để tránh rate limit GitHub API
+      const checks = repoList.slice(0, 10).map(async (repo) => {
+        try {
+          const data = await apiFetch(`/admin/github/starred/${repo.owner || repo.full_name.split('/')[0]}/${repo.name || repo.full_name.split('/')[1]}`, token);
+          return { full_name: repo.full_name, starred: data.starred };
+        } catch { return { full_name: repo.full_name, starred: false }; }
+      });
+      const results = await Promise.all(checks);
+      setStarredRepos(new Set(results.filter(r => r.starred).map(r => r.full_name)));
+    } catch { /* ignore */ }
+  }, [token]);
+
+  useEffect(() => {
+    fetchTrending().then(() => {
+      // Sau khi load trending xong, auto-check trạng thái star cho từng repo
+      // Dùng timeout nhỏ để repos state đã được set
+      setTimeout(() => {
+        setRepos(current => {
+          if (current.length > 0) fetchStarredStatus(current);
+          return current;
+        });
+      }, 500);
+    });
+  }, [fetchTrending]);
 
   const fetchSaved = useCallback(async () => {
     setSavedLoading(true);
@@ -599,21 +651,12 @@ export default function GitHubTrending({ token }) {
 
   useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
 
-  // Check which repos are starred on GitHub
-  const fetchStarredStatus = useCallback(async (repoList) => {
-    try {
-      const checks = repoList.map(async (repo) => {
-        try {
-          const data = await apiFetch(`/admin/github/starred/${repo.owner || repo.full_name.split('/')[0]}/${repo.name || repo.full_name.split('/')[1]}`, token);
-          return { full_name: repo.full_name, starred: data.starred };
-        } catch { return { full_name: repo.full_name, starred: false }; }
-      });
-      const results = await Promise.all(checks);
-      setStarredRepos(new Set(results.filter(r => r.starred).map(r => r.full_name)));
-    } catch { /* ignore */ }
-  }, [token]);
+  // Starred tab trigger — fetchGithubStarred đã được khai báo ở trên
+  useEffect(() => {
+    if (view === 'starred') fetchGithubStarred();
+  }, [view, fetchGithubStarred]);
 
-  // Star/Unstar a repo on GitHub
+  // Star/Unstar a repo on GitHub — hiện toast lỗi thay vì im lặng
   const handleStarRepo = async (repo) => {
     const fullName = repo.full_name;
     const isStarred = starredRepos.has(fullName);
@@ -624,27 +667,27 @@ export default function GitHubTrending({ token }) {
       if (isStarred) {
         await apiFetch(`/admin/github/star/${owner}/${name}`, token, { method: 'DELETE' });
         setStarredRepos(prev => { const s = new Set(prev); s.delete(fullName); return s; });
+        setError('');
       } else {
         await apiFetch('/admin/github/star', token, {
           method: 'POST',
           body: JSON.stringify({ owner, name }),
         });
         setStarredRepos(prev => new Set([...prev, fullName]));
+        setError('');
       }
     } catch (e) {
-      console.error('Star failed:', e.message);
+      // Hiển thị lỗi rõ cho user — thường là thiếu GITHUB_TOKEN
+      const msg = e.message || 'Lỗi star repo';
+      if (msg.includes('GitHub Personal Access Token') || msg.includes('GITHUB_TOKEN')) {
+        setError('⚠️ Cần GitHub Token: Thêm GITHUB_TOKEN vào .env hoặc nhập GitHub API Key trong Admin → API Keys');
+      } else {
+        setError('❌ Star thất bại: ' + msg);
+      }
     } finally {
       setStarringKey(null);
     }
   };
-
-  // Fetch all starred repos from GitHub
-  const fetchGithubStarred = useCallback(async () => {
-    try {
-      const data = await apiFetch('/admin/github/starred', token);
-      if (data.success) setGithubStarred(data.repos || []);
-    } catch { /* ignore */ }
-  }, [token]);
 
   // Export saved / starred repos
   const handleExport = async (type, format) => {

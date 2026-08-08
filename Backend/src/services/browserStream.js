@@ -219,30 +219,110 @@ class BrowserStreamService {
     return { success: true };
   }
 
-  // Lazy init Stagehand — chỉ khi thực sự cần act()
-  async _ensureStagehand() {
-    if (this.stagehand) return this.stagehand;
+  // Lấy key Groq từ DB (ưu tiên) hoặc env — key đã được verify hoạt động
+  async _getGroqKey() {
     try {
-      const apiKey = process.env.OPENAI_API_KEY || process.env.GROQ_API_KEY || '';
-      if (!apiKey) return null;
-      
-      console.log('[BrowserStream] Lazy-loading Stagehand...');
-      const { Stagehand } = require('@browserbasehq/stagehand');
-      this.stagehand = new Stagehand({
-        env: 'LOCAL',
-        modelName: 'gpt-4o-mini',
-        modelClientOptions: { apiKey },
-        enableCaching: true,
-        verbose: false,
-        domSettleTimeoutMs: 5000,
+      const db = require('../config/db');
+      const key = await new Promise((resolve) => {
+        db.get("SELECT gia_tri_khoa FROM khoa_api WHERE ten_nha_cung_cap = 'groq'", [], (e, r) => resolve(r?.gia_tri_khoa || ''));
       });
-      await this.stagehand.init();
-      this.stagehand.page = this.page;
-      return this.stagehand;
+      return key || process.env.GROQ_API_KEY || '';
     } catch (e) {
-      console.log('[Stagehand] Init failed, AI actions will use basic Playwright:', e.message);
-      this.stagehand = null;
-      return null;
+      return process.env.GROQ_API_KEY || '';
+    }
+  }
+
+  // Dùng Groq LLM dịch lệnh tiếng Việt → hành động JSON → thực thi bằng Playwright
+  // (điều khiển đúng page đang stream; không cần Stagehand vì v3 không wire được page ngoài)
+  async _executeWithGroq(instruction) {
+    const apiKey = await this._getGroqKey();
+    if (!apiKey) {
+      return { success: false, error: 'AI Action cần API key Groq. Vào Admin Panel → Keys để thêm, hoặc đặt GROQ_API_KEY trong .env.' };
+    }
+
+    const actionSchema = {
+      type: 'object',
+      properties: {
+        actions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', description: 'click | type | press | scroll | goto | wait | done' },
+              selector: { type: 'string', description: 'CSS selector hoặc text=... (chỉ cho click/type)' },
+              text: { type: 'string', description: 'nội dung cần gõ (chỉ cho type)' },
+              key: { type: 'string', description: 'phím như Enter/Backspace (chỉ cho press)' },
+              direction: { type: 'string', description: 'up/down/left/right (chỉ cho scroll)' },
+              url: { type: 'string', description: 'URL cần mở (chỉ cho goto)' },
+              description: { type: 'string' }
+            },
+            required: ['type']
+          }
+        }
+      },
+      required: ['actions']
+    };
+
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+        body: JSON.stringify({
+          model: 'openai/gpt-oss-20b',
+          messages: [
+            {
+              role: 'system',
+              content: 'Bạn là trợ lý điều khiển trình duyệt. Dịch chỉ dẫn của người dùng thành danh sách hành động JSON để thực hiện trên trang hiện tại. Ưu tiên dùng text=... hoặc CSS selector chính xác. Nếu chỉ dẫn là câu chào hoặc không cần thao tác, trả về actions rỗng. Trang hiện tại: ' + (this.page?.url() || 'chưa mở')
+            },
+            { role: 'user', content: instruction }
+          ],
+          response_format: { type: 'json_schema', json_schema: { name: 'browser_actions', schema: actionSchema } }
+        })
+      });
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      let actions = [];
+      try { actions = JSON.parse(content).actions || []; } catch (e) {
+        const m = content.match(/\{[\s\S]*\}/);
+        if (m) { try { actions = JSON.parse(m[0]).actions || []; } catch (e2) {} }
+      }
+
+      if (!actions || actions.length === 0) {
+        return { success: true, result: { message: 'Không có hành động phù hợp cho chỉ dẫn này.' } };
+      }
+
+      for (const a of actions) {
+        try {
+          switch (a.type) {
+            case 'click':
+              if (a.selector) await this.page.locator(a.selector).first().click({ timeout: 10000 });
+              break;
+            case 'type':
+              if (a.selector) await this.page.locator(a.selector).first().fill(a.text || '', { timeout: 10000 });
+              else await this.page.keyboard.type(a.text || '');
+              break;
+            case 'press':
+              await this.page.keyboard.press(a.key || 'Enter');
+              break;
+            case 'scroll':
+              await this.page.mouse.wheel(0, a.direction === 'up' ? -600 : 600);
+              break;
+            case 'goto':
+              if (a.url) await this.page.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+              break;
+            case 'wait':
+              await this.page.waitForTimeout(1200);
+              break;
+            case 'done':
+              return { success: true, result: { message: '✅ Đã hoàn tất: ' + (a.description || instruction) } };
+          }
+        } catch (e) {
+          console.log('[BrowserAction] Bỏ qua action lỗi:', a.type, e.message);
+        }
+      }
+      return { success: true, result: { message: `✅ Đã thực hiện ${actions.length} hành động: ${instruction}` } };
+    } catch (e) {
+      return { success: false, error: 'Lỗi AI Action: ' + e.message };
     }
   }
 
@@ -257,26 +337,35 @@ class BrowserStreamService {
 
   async act(instruction) {
     if (!this.page) await this.launch();
-    
-    // Lazy init Stagehand chỉ khi cần
-    const sh = await this._ensureStagehand();
-    if (sh) {
+
+    const trimmed = String(instruction || '').trim();
+    const goto = async (url) => {
       try {
-        const result = await sh.act(instruction);
-        return { success: true, result };
+        await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        return { success: true, result: { message: `Đã mở: ${url}` } };
       } catch (e) {
-        console.error('[Stagehand act] Error:', e.message);
-        return { success: false, error: e.message };
+        return { success: false, error: 'Không mở được trang: ' + e.message };
       }
+    };
+
+    // 1) Lệnh điều hướng (open/go to/visit/mở/truy cập...) → goto trực tiếp, không cần LLM
+    const navMatch = trimmed.match(/^(?:open|go to|visit|navigate to|mở|truy cập|tới)\s+(.+)$/i);
+    if (navMatch) {
+      let target = navMatch[1].trim();
+      if (/^https?:\/\//i.test(target)) return goto(target);
+      if (/^[^\s.]+\.[a-z]{2,}(?:\/.*)?$/i.test(target)) return goto('https://' + target);
+      // Không phải URL → coi như tìm kiếm
+      return goto('https://www.google.com/search?q=' + encodeURIComponent(target));
     }
-    
-    // Fallback to basic Playwright
-    try {
-      await this.page.evaluate(instruction);
-      return { success: true };
-    } catch (e) {
-      return { success: false, error: e.message };
+
+    // 2) Lệnh tìm kiếm (search/tìm kiếm/google...) → Google Search
+    const searchMatch = trimmed.match(/^(?:search|tìm kiếm|tìm|google)\s+(.+)$/i);
+    if (searchMatch) {
+      return goto('https://www.google.com/search?q=' + encodeURIComponent(searchMatch[1].trim()));
     }
+
+    // 3) Lệnh điều khiển phức tạp → Groq LLM dịch thành hành động rồi thực thi bằng Playwright
+    return await this._executeWithGroq(instruction);
   }
 
   async click(x, y) {

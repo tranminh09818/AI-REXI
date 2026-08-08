@@ -35,7 +35,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // Khởi tạo ứng dụng Express
 const app = express();
 // Ưu tiên PORT từ file .env để tránh bị biến môi trường hệ thống (vd: PORT=20128)
-// ghi đè khiến server chạy sai cổng / xung đột với OmniRoute.
+// ghi đè khiến server chạy sai cổng / xung đột với gateway khác.
 const envPortMatch = fs.existsSync(path.join(__dirname, '..', '.env'))
   ? fs.readFileSync(path.join(__dirname, '..', '.env'), 'utf8').match(/^PORT\s*=\s*(\d+)/m)
   : null;
@@ -48,8 +48,8 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    // Cho phép tất cả origin local
-    if (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('::1')) {
+    // Cho phép origin local hợp lệ — regex chính xác, chống giả mạo kiểu evil-localhost.com
+    if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin)) {
       return callback(null, true);
     }
     const envAllowed = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) : [];
@@ -66,6 +66,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Session secret - TẠO RANDOM nếu không có env var (tốt hơn hardcode)
 // FIX: ưu tiên SESSION_SECRET, fallback JWT_SECRET (ổn định giữa các lần restart thay vì random mỗi lần)
 const sessionSecret = process.env.SESSION_SECRET || process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.JWT_SECRET) {
+  console.warn('[WARN] JWT_SECRET chưa được cấu hình trong .env — token sẽ hết hiệu lực mỗi lần restart server. Nên thêm JWT_SECRET vào .env.');
+}
 app.use(session({
   secret: sessionSecret,
   resave: false,
@@ -97,6 +100,26 @@ app.use('/api/agent', agentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/github', githubRoutes);
 
+// SSE endpoint: frontend kết nối để nhận thông báo model scan hoàn tất
+const sseClients = new Set();
+global.__modelScanComplete = (data) => {
+  const payload = `data: ${JSON.stringify(data)}\n\n`;
+  for (const res of sseClients) {
+    try { res.write(payload); } catch (e) { sseClients.delete(res); }
+  }
+};
+app.get('/api/models/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('\n');
+  sseClients.add(res);
+  req.on('close', () => sseClients.delete(res));
+});
+
 // (Tùy chọn) Phục vụ ứng dụng React đã build cho môi trường production
 const frontendBuildPath = path.join(__dirname, '..', 'Frontend', 'dist');
 if (fs.existsSync(frontendBuildPath)) {
@@ -107,17 +130,37 @@ if (fs.existsSync(frontendBuildPath)) {
     });
 }
 
-// Khởi động server + auto-scanner IPTV
+// Khởi động server + auto-scanner IPTV + Model Health Scanner
 const { startScheduler } = require('./src/scheduler');
 const { startGitHubScheduler } = require('./src/github-trending-scheduler');
+const { startModelScannerScheduler } = require('./src/model-scanner.scheduler');
 const server = app.listen(PORT, () => {
   console.log(`[Server] AI REXI Backend đang chạy tại http://localhost:${PORT}`);
   if (process.env.ENABLE_IPTV_SCHEDULER !== 'false') {
     startScheduler();
   }
   startGitHubScheduler();
+  // Auto-scan: quét ngay khi server khởi động (sau 5s) rồi lặp lại mỗi 6h
+  // Không cố định vào 3:00 AM — mỗi 6h tính từ lúc server bật
+  startModelScannerScheduler();
 });
 
 // WebSocket server cho Browser Stream
 const wss = new WebSocketServer({ server, path: '/api/services/browser/stream' });
 browserStream.setWSS(wss);
+
+// Dọn dẹp file tạm (TTS, caption, uploads...) quá 1 giờ tuổi — tránh tích tụ ổ cứng
+setInterval(() => {
+  try {
+    const tempDir = path.join(__dirname, 'temp');
+    if (!fs.existsSync(tempDir)) return;
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    fs.readdirSync(tempDir).forEach(f => {
+      try {
+        const fp = path.join(tempDir, f);
+        const st = fs.statSync(fp);
+        if (st.isFile() && st.mtimeMs < cutoff) fs.unlinkSync(fp);
+      } catch (e) {}
+    });
+  } catch (e) {}
+}, 60 * 60 * 1000);

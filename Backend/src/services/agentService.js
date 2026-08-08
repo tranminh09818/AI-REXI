@@ -1,59 +1,60 @@
-﻿const path = require('path');
+const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
+const { stripAnsi } = require('../utils/stripAnsi');
 
 // ========== TOOL REGISTRY ==========
-// ThÃªm tool má»›i chá»‰ cáº§n thÃªm 1 object vÃ o Ä‘Ã¢y, AI tá»± hiá»ƒu vÃ  dÃ¹ng!
+// Thêm tool mới chỉ cần thêm 1 object vào đây, AI tự hiểu và dùng!
 const TOOL_REGISTRY = [
   {
     name: 'browser_navigate',
-    description: 'Má»Ÿ trÃ¬nh duyá»‡t Ä‘áº¿n URL báº¥t ká»³. DÃ¹ng Ä‘á»ƒ xem web, YouTube, TikTok, TV online, opencut edit video...',
-    parameters: { type: 'object', properties: { url: { type: 'string', description: 'URL cáº§n má»Ÿ' } }, required: ['url'] }
+    description: 'Mở trình duyệt đến URL bất kỳ. Dùng để xem web, YouTube, TikTok, TV online, opencut edit video...',
+    parameters: { type: 'object', properties: { url: { type: 'string', description: 'URL cần mở' } }, required: ['url'] }
   },
   {
     name: 'browser_click',
-    description: 'Click chuá»™t táº¡i vá»‹ trÃ­ (x,y) trÃªn trang web',
-    parameters: { type: 'object', properties: { x: { type: 'number', description: 'Tá»a Ä‘á»™ X' }, y: { type: 'number', description: 'Tá»a Ä‘á»™ Y' } }, required: ['x', 'y'] }
+    description: 'Click chuột tại vị trí (x,y) trên trang web',
+    parameters: { type: 'object', properties: { x: { type: 'number', description: 'Tọa độ X' }, y: { type: 'number', description: 'Tọa độ Y' } }, required: ['x', 'y'] }
   },
   {
     name: 'browser_type',
-    description: 'GÃµ text vÃ o Ã´ input trÃªn web',
-    parameters: { type: 'object', properties: { text: { type: 'string', description: 'Ná»™i dung cáº§n gÃµ' } }, required: ['text'] }
+    description: 'Gõ text vào ô input trên web',
+    parameters: { type: 'object', properties: { text: { type: 'string', description: 'Nội dung cần gõ' } }, required: ['text'] }
   },
   {
     name: 'browser_act',
-    description: 'DÃ¹ng AI thá»±c hiá»‡n hÃ nh Ä‘á»™ng phá»©c táº¡p trÃªn web (click nÃºt, Ä‘iá»n form, Ä‘á»c ná»™i dung...)',
-    parameters: { type: 'object', properties: { instruction: { type: 'string', description: 'MÃ´ táº£ hÃ nh Ä‘á»™ng cáº§n lÃ m' } }, required: ['instruction'] }
+    description: 'Dùng AI thực hiện hành động phức tạp trên web (click nút, điền form, đọc nội dung...)',
+    parameters: { type: 'object', properties: { instruction: { type: 'string', description: 'Mô tả hành động cần làm' } }, required: ['instruction'] }
   },
   {
     name: 'browser_screenshot',
-    description: 'Chá»¥p mÃ n hÃ¬nh browser Ä‘á»ƒ kiá»ƒm tra káº¿t quáº£',
+    description: 'Chụp màn hình browser để kiểm tra kết quả',
     parameters: { type: 'object', properties: {} }
   },
   {
     name: 'process_word',
-    description: 'Äá»c/xá»­ lÃ½ file Word (.docx). DÃ¹ng Ä‘á»ƒ phÃ¢n tÃ­ch, chá»‰nh sá»­a vÄƒn báº£n',
-    parameters: { type: 'object', properties: { filePath: { type: 'string', description: 'ÄÆ°á»ng dáº«n file Word' }, instruction: { type: 'string', description: 'Cáº§n lÃ m gÃ¬ vá»›i file?' } }, required: ['filePath', 'instruction'] }
+    description: 'Đọc/xử lý file Word (.docx). Dùng để phân tích, chỉnh sửa văn bản',
+    parameters: { type: 'object', properties: { filePath: { type: 'string', description: 'Đường dẫn file Word' }, instruction: { type: 'string', description: 'Cần làm gì với file?' } }, required: ['filePath', 'instruction'] }
   },
   {
     name: 'create_word',
-    description: 'Táº¡o file Word má»›i vá»›i ná»™i dung chá»‰ Ä‘á»‹nh',
-    parameters: { type: 'object', properties: { content: { type: 'string', description: 'Ná»™i dung file' }, outputPath: { type: 'string', description: 'ÄÆ°á»ng dáº«n lÆ°u file' } }, required: ['content', 'outputPath'] }
+    description: 'Tạo file Word mới với nội dung chỉ định',
+    parameters: { type: 'object', properties: { content: { type: 'string', description: 'Nội dung file' }, outputPath: { type: 'string', description: 'Đường dẫn lưu file' } }, required: ['content', 'outputPath'] }
   },
   {
     name: 'execute_command',
-    description: 'Cháº¡y lá»‡nh terminal/CMD. DÃ¹ng Ä‘á»ƒ cháº¡y script, build code, cÃ i Ä‘áº·t...',
-    parameters: { type: 'object', properties: { command: { type: 'string', description: 'CÃ¢u lá»‡nh cáº§n cháº¡y' } }, required: ['command'] }
+    description: 'Chạy lệnh terminal/CMD. Dùng để chạy script, build code, cài đặt...',
+    parameters: { type: 'object', properties: { command: { type: 'string', description: 'Câu lệnh cần chạy' } }, required: ['command'] }
   },
   {
     name: 'search_web',
-    description: 'TÃ¬m kiáº¿m thÃ´ng tin trÃªn internet',
-    parameters: { type: 'object', properties: { query: { type: 'string', description: 'Tá»« khÃ³a tÃ¬m kiáº¿m' } }, required: ['query'] }
+    description: 'Tìm kiếm thông tin trên internet',
+    parameters: { type: 'object', properties: { query: { type: 'string', description: 'Từ khóa tìm kiếm' } }, required: ['query'] }
   },
   {
     name: 'web_analyze',
-    description: 'Phan tich website tu URL: doc noi dung, chup screenshot, danh gia SEO, design, toc do. Dung khi user muon danh gia 1 website.',
-    parameters: { type: 'object', properties: { url: { type: 'string', description: 'URL website can phan tich' } }, required: ['url'] }
+    description: 'Phân tích website từ URL: đọc nội dung, chụp screenshot, đánh giá SEO, design, tốc độ. Dùng khi user muốn đánh giá 1 website.',
+    parameters: { type: 'object', properties: { url: { type: 'string', description: 'URL website cần phân tích' } }, required: ['url'] }
   },
   {
     name: 'text_to_speech',
@@ -85,13 +86,13 @@ async function executeTool(toolName, args) {
       if (!browserStream.browser) await browserStream.launch();
       return await browserStream.act(args.instruction);
     case 'browser_screenshot':
-      if (!browserStream.page) return { error: 'Browser chua mo' };
+      if (!browserStream.page) return { error: 'Browser chưa mở' };
       const buf = await browserStream.page.screenshot({ type: 'jpeg', quality: 70 });
       return { screenshot: 'data:image/jpeg;base64,' + buf.toString('base64') };
     case 'process_word': {
       const content = fs.readFileSync(args.filePath, 'utf-8');
-      const result = await callAI('Xu ly: ' + args.instruction + '\n\nNoi dung:\n' + content);
-      if (args.savePath && result && !result.startsWith('Loi AI:')) {
+      const result = await callAI('Xử lý: ' + args.instruction + '\n\nNội dung:\n' + content);
+      if (args.savePath && result && !result.startsWith('Lỗi AI:')) {
         fs.writeFileSync(args.savePath, result, 'utf-8');
         return { result, savedTo: args.savePath };
       }
@@ -106,7 +107,7 @@ async function executeTool(toolName, args) {
       return { success: true, path: args.outputPath, size: buffer.length };
     }
     case 'execute_command':
-      return new Promise(r => exec(args.command, { timeout: 30000 }, (e, o, e2) => r({ success: !e, stdout: (o||'').trim(), stderr: (e2||'').trim() })));
+      return new Promise(r => exec(args.command, { timeout: 30000, env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', TERM: 'dumb' } }, (e, o, e2) => r({ success: !e, stdout: stripAnsi((o||'')).trim(), stderr: stripAnsi((e2||'')).trim() })));
     case 'search_web': {
       const resp = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(args.query), { headers: { 'User-Agent': 'Mozilla/5.0' } });
       const html = await resp.text();
@@ -115,7 +116,7 @@ async function executeTool(toolName, args) {
     }
     case 'web_analyze': {
       const url = args.url;
-      if (!url) return { error: 'Thieu URL' };
+      if (!url) return { error: 'Thiếu URL' };
       if (!browserStream.browser) await browserStream.launch();
       const page = browserStream.page || (await browserStream.browser.newPage());
       const startTime = Date.now();
@@ -123,8 +124,8 @@ async function executeTool(toolName, args) {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
         const loadTime = Date.now() - startTime;
         const title = await page.title();
-        const metaDesc = await page.$eval('meta[name="description"]', el => el.content).catch(() => '(khong co)');
-        const metaKeywords = await page.$eval('meta[name="keywords"]', el => el.content).catch(() => '(khong co)');
+        const metaDesc = await page.$eval('meta[name="description"]', el => el.content).catch(() => '(không có)');
+        const metaKeywords = await page.$eval('meta[name="keywords"]', el => el.content).catch(() => '(không có)');
         const h1Count = await page.$$eval('h1', els => els.length);
         const h2Count = await page.$$eval('h2', els => els.length);
         const imgNoAlt = await page.$$eval('img:not([alt]), img[alt=""]', els => els.length);
@@ -139,13 +140,13 @@ async function executeTool(toolName, args) {
           imgNoAlt, totalImages, links, loadTime, htmlSize,
           bodyText, screenshot,
           score: {
-            seo: h1Count > 0 && metaDesc !== '(khong co)' ? 'Tot' : 'Can cai thien',
-            speed: loadTime < 2000 ? 'Nhanh' : loadTime < 5000 ? 'Trung binh' : 'Cham',
-            accessibility: imgNoAlt === 0 ? 'Tot' : 'Co ' + imgNoAlt + ' anh thieu alt'
+            seo: h1Count > 0 && metaDesc !== '(không có)' ? 'Tốt' : 'Cần cải thiện',
+            speed: loadTime < 2000 ? 'Nhanh' : loadTime < 5000 ? 'Trung bình' : 'Chậm',
+            accessibility: imgNoAlt === 0 ? 'Tốt' : 'Có ' + imgNoAlt + ' ảnh thiếu alt'
           }
         };
       } catch (err) {
-        return { error: 'Loi phan tich: ' + err.message };
+        return { error: 'Lỗi phân tích: ' + err.message };
       }
     }
     case 'text_to_speech': {
@@ -177,7 +178,7 @@ async function executeTool(toolName, args) {
       });
     }
     default:
-      return { error: "Tool '" + toolName + "' chua duoc implement" };
+      return { error: "Tool '" + toolName + "' chưa được implement" };
   }
 }
 
@@ -185,25 +186,25 @@ async function executeTool(toolName, args) {
 async function callAI(prompt, m) {
   const { spawn } = require('child_process');
   const OPENCODE_BIN = process.env.OPENCODE_BIN_PATH || path.join(process.env.USERPROFILE || '', '.opencode', 'bin', 'opencode.exe');
-  const model = m || 'omniroute/auto/best-coding';
+  const model = m || 'opencode/deepseek-v4-flash-free';
 
   // Thử OpenCode binary trước (miễn phí)
   if (fs.existsSync(OPENCODE_BIN)) {
     return new Promise((resolve) => {
       const proc = spawn(OPENCODE_BIN, ['run', prompt, '--auto', '--model', model], {
         timeout: 30000,
-        env: { ...process.env, LANG: 'en_US.UTF-8' }
+        env: { ...process.env, LANG: 'en_US.UTF-8', NO_COLOR: '1', FORCE_COLOR: '0', TERM: 'dumb', CLICOLOR: '0', CLICOLOR_FORCE: '0' }
       });
       let stdout = '';
       let stderr = '';
-      proc.stdout.on('data', d => stdout += d);
-      proc.stderr.on('data', d => stderr += d);
-      proc.on('close', () => resolve(stdout.trim() || stderr.trim() || 'Loi AI: Khong co phan hoi.'));
-      proc.on('error', () => resolve('Loi AI: Khong tim thay OpenCode binary.'));
+      proc.stdout.on('data', d => { stdout += stripAnsi(d.toString()); });
+      proc.stderr.on('data', d => { stderr += stripAnsi(d.toString()); });
+      proc.on('close', () => resolve(stdout.trim() || stderr.trim() || 'Lỗi AI: Không có phản hồi.'));
+      proc.on('error', () => resolve('Lỗi AI: Không tìm thấy OpenCode binary.'));
     });
   }
 
-  return 'Loi AI: Chua cai dat OpenCode. Vui long cai dat de su dung tinh nang AI.';
+  return 'Lỗi AI: Chưa cài đặt OpenCode. Vui lòng cài đặt để sử dụng tính năng AI.';
 }
 
 module.exports = { executeTool, TOOL_REGISTRY, callAI };

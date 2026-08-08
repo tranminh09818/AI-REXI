@@ -21,9 +21,12 @@ function initDB() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS iptv_scan_log (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, finished_at TEXT, status TEXT DEFAULT 'running', total_channels INTEGER DEFAULT 0, online_channels INTEGER DEFAULT 0, offline_channels INTEGER DEFAULT 0, countries_scanned INTEGER DEFAULT 0, new_channels INTEGER DEFAULT 0, lost_channels INTEGER DEFAULT 0);
     CREATE TABLE IF NOT EXISTS iptv_channels (id INTEGER PRIMARY KEY AUTOINCREMENT, country TEXT NOT NULL, country_name TEXT DEFAULT '', group_name TEXT DEFAULT '', channel_name TEXT NOT NULL, url TEXT NOT NULL, logo TEXT DEFAULT '', status TEXT DEFAULT 'unknown', latency_ms INTEGER DEFAULT 0, http_code INTEGER DEFAULT 0, last_checked TEXT, last_online TEXT, first_seen TEXT DEFAULT (datetime('now')), scan_id INTEGER REFERENCES iptv_scan_log(id));
+    CREATE TABLE IF NOT EXISTS iptv_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, title TEXT NOT NULL, message TEXT DEFAULT '', data TEXT DEFAULT '{}', is_read INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')));
     CREATE INDEX IF NOT EXISTS idx_iptv_url ON iptv_channels(url);
     CREATE INDEX IF NOT EXISTS idx_iptv_country ON iptv_channels(country);
     CREATE INDEX IF NOT EXISTS idx_iptv_status ON iptv_channels(status);
+    CREATE INDEX IF NOT EXISTS idx_notif_read ON iptv_notifications(is_read);
+    CREATE INDEX IF NOT EXISTS idx_notif_created ON iptv_notifications(created_at DESC);
   `);
 }
 
@@ -165,10 +168,28 @@ async function main() {
     db.prepare(`UPDATE iptv_scan_log SET status='done',finished_at=?,total_channels=?,online_channels=?,offline_channels=?,countries_scanned=?,new_channels=?,lost_channels=? WHERE id=?`)
       .run(finishTime, allChannels.length, onlineCount, allChannels.length - onlineCount, countries.length, newCount, lostCount, scanId);
     console.log('\n  Saved scan #' + scanId);
+
+    // ─── Tạo notification khi scan xong ───
+    try {
+      const notifType = (newCount > 0 || lostCount > 0) ? 'scan_changes' : 'scan_complete';
+      const parts = [];
+      parts.push(`${allChannels.length.toLocaleString()} kênh, ${onlineCount.toLocaleString()} online`);
+      if (newCount > 0) parts.push(`+${newCount} mới`);
+      if (lostCount > 0) parts.push(`-${lostCount} mất`);
+      const msg = `Quét ${countries.length} quốc gia: ${parts.join(', ')}`;
+      const data = JSON.stringify({ scan_id: scanId, total: allChannels.length, online: onlineCount, new: newCount, lost: lostCount, countries: countries.length });
+      db.prepare('INSERT INTO iptv_notifications (type, title, message, data) VALUES (?, ?, ?, ?)').run(notifType, 'Scan hoàn tất', msg, data);
+      console.log('  Notification created');
+    } catch (e) { console.error('  Notification error:', e.message); }
   }
 }
 
 main().catch(e => { console.error('FATAL:', e.message);
-  if (db) try { db.prepare("UPDATE iptv_scan_log SET status='failed',finished_at=datetime('now') WHERE status='running'").run(); } catch {}
+  if (db) {
+    try {
+      db.prepare("UPDATE iptv_scan_log SET status='failed',finished_at=datetime('now') WHERE status='running'").run();
+      db.prepare("INSERT INTO iptv_notifications (type, title, message, data) VALUES (?, ?, ?, ?)").run('scan_failed', 'Scan thất bại', e.message || 'Lỗi không xác định', '{}');
+    } catch {}
+  }
   process.exit(1);
 });

@@ -5,9 +5,9 @@ const db = require('./config/db');
 let ADMIN_SEED = null;
 try {
   ADMIN_SEED = require('D:/AI REXI/Database/admin-seed.js');
-} catch (e) {
+                    } catch (e) {
   console.log('[ADMIN-SEED] No admin-seed.js found, skipping');
-}
+                    }
 
 /**
  * Đảm bảo tài khoản admin cố định luôn tồn tại trong DB.
@@ -57,9 +57,14 @@ function ensureAdmin() {
                 } else {
                     // Tạo admin mới
                     const maUser = crypto.randomUUID();
-                    const hashedPassword = bcrypt.hashSync(ADMIN_SEED.mat_khau_ma_hoa_hash || 'admin@rexi.com', 10);
+                    // FIX SECURITY: KHÔNG dùng mật khẩu mặc định dễ đoán — tạo ngẫu nhiên nếu seed chưa có hash
+                    const seedPassword = ADMIN_SEED.mat_khau_ma_hoa_hash || crypto.randomBytes(9).toString('base64url');
+                    const hashedPassword = bcrypt.hashSync(seedPassword, 10);
 
                     console.log('[ADMIN-SEED] Creating admin:', ADMIN_SEED.email);
+                    if (!ADMIN_SEED.mat_khau_ma_hoa_hash) {
+                            console.log('[ADMIN-SEED] ⚠️ Mật khẩu admin ban đầu (đăng nhập rồi đổi ngay):', seedPassword);
+                    }
                     dbInstance.run(
                         "INSERT INTO nguoi_dung (ma_nguoi_dung, email, mat_khau_ma_hoa, ten_day_du, phan_quyen, anh_dai_dien) VALUES (?, ?, ?, ?, 'admin', ?)",
                         [maUser, ADMIN_SEED.email, hashedPassword, ADMIN_SEED.ten_day_du, null],
@@ -76,7 +81,7 @@ function ensureAdmin() {
             }
         );
     });
-}
+                    }
 
 // ─── Guest user cố định ─────────────────────────────────
 // Khách chưa đăng nhập vẫn cần một bản ghi nguoi_dung hợp lệ
@@ -125,6 +130,6 @@ function ensureGuestUser() {
             }
         );
     });
-}
+                    }
 
 module.exports = { ensureAdmin, ensureGuestUser, GUEST_USER_ID };

@@ -1,205 +1,403 @@
-import React, { useState, useEffect } from 'react';
-import { Play, Volume2, Wifi, ExternalLink, Copy, Search } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Play, Pause, Download, Volume2, Mic, RotateCcw, RotateCw, Loader2, Clock, Type, Hash, ChevronDown, User, MapPin, SkipBack, SkipForward } from 'lucide-react';
 
-const VIDEO_TOOLS = [
-  {
-    category: 'TTS - Chuyển Đổi Chữ Thành Giọng Nói',
-    icon: <Volume2 size={16} className="text-emerald-400" />,
-    tools: [
-      { id: 'web-speech', name: 'Web Speech API', desc: 'Chạy trong trình duyệt, không cần server', status: 'ready', badge: 'Miễn phí' },
-      { id: 'edge-tts', name: 'Server edge-tts', desc: '10 giọng Việt (Nam/Nữ), chất lượng cao', status: 'ready', badge: '10 voices' },
-      { id: 'valtec', name: 'Valtec TTS', desc: '74.8M params, chạy CPU, zero-shot cloning', status: 'setup', badge: '360⭐' },
-      { id: 'vietvoice', name: 'VietVoice-TTS', desc: 'Voice cloning chuyên nghiệp', status: 'setup', badge: '105⭐' },
-      { id: 'viettts', name: 'VietTTS', desc: '8 giọng nổi tiếng', status: 'setup', badge: '8 voices' },
-      { id: 'ngthitts', name: 'NghiTTS', desc: 'Chạy trong browser', status: 'setup', badge: '139⭐' },
-      { id: 'omnivoice', name: 'OmniVoice', desc: '600+ ngôn ngữ, voice cloning', status: 'setup', badge: '8k⭐' }
-    ]
-  },
-  {
-    category: 'Video - Tạo & Chỉnh Sửa Video',
-    icon: <Play size={16} className="text-purple-400" />,
-    tools: [
-      { id: 'claude-video', name: 'claude-video', desc: 'Tạo video từ text/image, chỉnh sửa, avatar', status: 'ready', badge: 'Integrated' },
-      { id: 'opencut', name: 'OpenCut', desc: 'Open-source CapCut alternative', status: 'repo', badge: '30k⭐', repo: 'floomhq/opencut' },
-      { id: 'opencut-ai', name: 'OpenCut-AI', desc: 'AI video editor: transcribe, edit by text', status: 'repo', badge: '160⭐', repo: 'floomhq/opencut-ai' },
-      { id: 'hyperframes', name: 'HyperFrames', desc: 'HTML to MP4 video renderer cho agents', status: 'repo', badge: '37k⭐', repo: 'floomhq/hyperframes' },
-      { id: 'hf-tailwind', name: 'HyperFrames @tailwind', desc: 'Tailwind CSS integration', status: 'repo', badge: '71K⭐', repo: 'floomhq/hyperframes-tailwind' },
-      { id: 'hf-figma', name: 'HyperFrames @figma', desc: 'Figma integration', status: 'repo', badge: '51K⭐', repo: 'floomhq/hyperframes-figma' }
-    ]
-  },
-  {
-    category: 'IPTV - Stream Tools',
-    icon: <Wifi size={16} className="text-cyan-400" />,
-    tools: [
-      { id: 'iptv-core', name: 'iptv (core)', desc: 'Core IPTV streaming library', status: 'repo', badge: 'Core', repo: 'iptv-org/iptv' },
-      { id: 'iptv-channels', name: 'iptv-channels', desc: '200+ quốc gia, M3U playlists, EPG', status: 'ready', badge: 'Integrated' },
-      { id: 'iptv-global', name: 'iptv-global', desc: 'Quản lý IPTV toàn cầu, catch-up TV', status: 'ready', badge: 'Integrated' }
-    ]
-  }
+const VN_VOICES = [
+  { id: 'vi-VN-HoaiMyNeural', label: 'Hoài Mỹ', gender: 'Nữ', region: 'Bắc', color: 'rose' },
+  { id: 'vi-VN-NamMinhNeural', label: 'Nam Minh', gender: 'Nam', region: 'Nam', color: 'blue' },
+  { id: 'vi-VN-DuyAnhNeural', label: 'Duy Anh', gender: 'Nam', region: 'Bắc', color: 'cyan' },
+  { id: 'vi-VN-HaSanhNeural', label: 'Đà Sanh', gender: 'Nữ', region: 'Nam', color: 'violet' },
+  { id: 'vi-VN-MinhAnhNeural', label: 'Minh Anh', gender: 'Nữ', region: 'Bắc', color: 'pink' },
+  { id: 'vi-VN-ThuyMinhNeural', label: 'Thùy Minh', gender: 'Nữ', region: 'Nam', color: 'teal' },
+  { id: 'vi-VN-ThiTuyetNeural', label: 'Thị Tuyết', gender: 'Nữ', region: 'Bắc', color: 'amber' },
+  { id: 'vi-VN-VanHanhNeural', label: 'Vân Hân', gender: 'Nữ', region: 'Nam', color: 'emerald' },
+  { id: 'vi-VN-VanMinhNeural', label: 'Văn Minh', gender: 'Nam', region: 'Bắc', color: 'indigo' },
+  { id: 'vi-VN-CaoVietNeural', label: 'Cao Việt', gender: 'Nam', region: 'Nam', color: 'orange' },
 ];
 
+const QUICK_SAMPLES = [
+  { label: 'Chào mừng', text: 'Xin chào, tôi là AI Rexi, trợ lý ảo thông minh của bạn.' },
+  { label: 'Bản tin', text: 'Hôm nay thời tiết Hà Nội ổn định, nền kinh tế tăng trưởng 6.5% so với quý trước.' },
+  { label: 'Giới thiệu', text: 'Dự án AI Rexi đang phát triển rất tốt với hơn 10 tính năng AI tích hợp.' },
+  { label: 'Quảng cáo', text: 'Giảm giá sốc 50% tất cả sản phẩm! Chỉ còn 3 ngày, nhanh tay đặt hàng ngay!' },
+];
+
+const VOICE_COLORS = {
+  rose: { bg: 'bg-rose-500/10', border: 'border-rose-500/30', text: 'text-rose-300', ring: 'ring-rose-500/40' },
+  blue: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-300', ring: 'ring-blue-500/40' },
+  cyan: { bg: 'bg-cyan-500/10', border: 'border-cyan-500/30', text: 'text-cyan-300', ring: 'ring-cyan-500/40' },
+  violet: { bg: 'bg-violet-500/10', border: 'border-violet-500/30', text: 'text-violet-300', ring: 'ring-violet-500/40' },
+  pink: { bg: 'bg-pink-500/10', border: 'border-pink-500/30', text: 'text-pink-300', ring: 'ring-pink-500/40' },
+  teal: { bg: 'bg-teal-500/10', border: 'border-teal-500/30', text: 'text-teal-300', ring: 'ring-teal-500/40' },
+  amber: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-300', ring: 'ring-amber-500/40' },
+  emerald: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-300', ring: 'ring-emerald-500/40' },
+  indigo: { bg: 'bg-indigo-500/10', border: 'border-indigo-500/30', text: 'text-indigo-300', ring: 'ring-indigo-500/40' },
+  orange: { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-300', ring: 'ring-orange-500/40' },
+};
+
 export default function StudioTab({ API_BASE, authToken, showToast }) {
-  const [copiedLink, setCopiedLink] = useState(null);
-  const [ttsStatus, setTtsStatus] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [text, setText] = useState('');
+  const [voice, setVoice] = useState('vi-VN-HoaiMyNeural');
+  const [rate, setRate] = useState(0);
+  const [pitch, setPitch] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [audioUrl, setAudioUrl] = useState(null);
+  const [playing, setPlaying] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [showVoicePanel, setShowVoicePanel] = useState(false);
+  const [previewingVoice, setPreviewingVoice] = useState(null);
+  const audioRef = useRef(null);
+  const previewAudioRef = useRef(null);
+  const textareaRef = useRef(null);
 
-  useEffect(() => {
-    fetchTTSStatus();
-  }, []);
+  const selectedVoice = VN_VOICES.find(v => v.id === voice);
+  const colors = VOICE_COLORS[selectedVoice?.color] || VOICE_COLORS.cyan;
 
-  const fetchTTSStatus = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/services/tts/status`, {
-        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
-      });
-      const data = await res.json();
-      setTtsStatus(data);
-    } catch (err) {
-      setTtsStatus({ success: false });
+  const formatRate = (v) => v >= 0 ? `+${v}%` : `${v}%`;
+  const formatPitch = (v) => v >= 0 ? `+${v}Hz` : `${v}Hz`;
+
+  const charCount = text.length;
+  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const estimatedSeconds = Math.ceil(wordCount * 0.4);
+
+  const handlePreviewVoice = async (voiceId) => {
+    if (previewingVoice === voiceId) {
+      if (previewAudioRef.current) { previewAudioRef.current.pause(); }
+      setPreviewingVoice(null);
+      return;
     }
-  };
-
-  const handleTTSTest = async () => {
-    const headers = { 'Content-Type': 'application/json' };
-    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+    setPreviewingVoice(voiceId);
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
       const res = await fetch(`${API_BASE}/services/tts`, {
         method: 'POST', headers, credentials: 'include',
-        body: JSON.stringify({ text: 'Xin chào, đây là giọng nói thử nghiệm từ AI Rexi.', voice: 'vi-VN-HoaiMyNeural' })
+        body: JSON.stringify({ text: 'Xin chào, đây là giọng nói mẫu.', voice: voiceId, rate: '+0%', pitch: '+0Hz' }),
       });
       const data = await res.json();
       if (data.success && data.audio) {
-        new Audio('data:audio/mp3;base64,' + data.audio).play();
-        showToast('Đang phát giọng nói thử nghiệm!', 'success');
+        const url = 'data:audio/mp3;base64,' + data.audio;
+        if (previewAudioRef.current) { previewAudioRef.current.pause(); }
+        previewAudioRef.current = new Audio(url);
+        previewAudioRef.current.onended = () => setPreviewingVoice(null);
+        previewAudioRef.current.onerror = () => setPreviewingVoice(null);
+        previewAudioRef.current.play();
       } else {
-        showToast(data.error || 'TTS server không khả dụng', 'error');
+        setPreviewingVoice(null);
+      }
+    } catch { setPreviewingVoice(null); }
+  };
+
+  const handleGenerate = async () => {
+    if (!text.trim()) return;
+    setLoading(true);
+    setAudioUrl(null);
+    setPlaying(false);
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+      const res = await fetch(`${API_BASE}/services/tts`, {
+        method: 'POST', headers, credentials: 'include',
+        body: JSON.stringify({
+          text: text.trim(),
+          voice,
+          rate: formatRate(rate),
+          pitch: formatPitch(pitch),
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.audio) {
+        const url = 'data:audio/mp3;base64,' + data.audio;
+        setAudioUrl(url);
+        setHistory(prev => [{
+          text: text.trim().substring(0, 60),
+          voice: selectedVoice?.label || voice,
+          time: new Date().toLocaleTimeString('vi-VN'),
+          url
+        }, ...prev].slice(0, 10));
+        showToast('Tạo audio thành công!', 'success');
+      } else {
+        showToast(data.error || 'TTS không khả dụng', 'error');
       }
     } catch (err) {
-      showToast('Lỗi TTS: ' + err.message, 'error');
+      showToast('Lỗi: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleCopyRepo = (repoName, fullName) => {
-    const repoUrl = `https://github.com/${repoName}`;
-    navigator.clipboard.writeText(repoUrl).then(() => {
-      setCopiedLink(fullName);
-      setTimeout(() => setCopiedLink(null), 2000);
-      showToast(`Link repo ${fullName} đã được sao chép!`, 'success');
-    });
+  const handlePlayPause = () => {
+    if (!audioRef.current) return;
+    if (playing) { audioRef.current.pause(); } else { audioRef.current.play(); }
   };
 
-  const filteredTools = searchQuery
-    ? VIDEO_TOOLS.map(group => ({
-        ...group,
-        tools: group.tools.filter(t =>
-          t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          t.desc.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      })).filter(group => group.tools.length > 0)
-    : VIDEO_TOOLS;
+  const handleDownload = () => {
+    if (!audioUrl) return;
+    const a = document.createElement('a');
+    a.href = audioUrl;
+    a.download = `rexi_tts_${Date.now()}.mp3`;
+    a.click();
+  };
+
+  const playHistoryItem = (item) => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    setAudioUrl(item.url);
+    setPlaying(false);
+  };
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.onended = () => setPlaying(false);
+      audioRef.current.onplay = () => setPlaying(true);
+      audioRef.current.onpause = () => setPlaying(false);
+    }
+  }, [audioUrl]);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleGenerate();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [text, voice, rate, pitch]);
 
   return (
-    <div className="flex flex-col h-full w-full p-4 overflow-y-auto space-y-4 bg-[#0c0d11]">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Play size={20} className="text-purple-400" />
-          <h1 className="text-sm font-bold text-white">Video & Audio Studio</h1>
-          <span className="text-xs text-slate-500">TTS • Video Creation • IPTV Tools</span>
+    <div className="flex h-full w-full overflow-hidden bg-[#0a0b0f]">
+      {/* Left Panel - Main Content */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Header */}
+        <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+              <Volume2 size={18} className="text-white" />
+            </div>
+            <div>
+              <h1 className="text-sm font-bold text-white">TTS Studio</h1>
+              <p className="text-[10px] text-slate-500">Chuyển văn bản thành giọng nói tiếng Việt</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {history.length > 0 && (
+              <button
+                onClick={() => setShowVoicePanel(!showVoicePanel)}
+                className={`md:hidden px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all ${showVoicePanel ? 'bg-cyan-500/15 text-cyan-300' : 'bg-white/5 text-slate-400 hover:text-white'}`}
+              >
+                Lịch sử ({history.length})
+              </button>
+            )}
+          </div>
         </div>
-        <button
-          onClick={handleTTSTest}
-          disabled={!ttsStatus?.edge_tts}
-          className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/30 disabled:opacity-50 text-xs font-medium flex items-center gap-1 transition-all"
-          title="Test server TTS (giọng Hoài Mỹ)"
-        >
-          <Play size={12} /> Test TTS
-        </button>
-      </div>
 
-      {/* Search */}
-      <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#181920] border border-white/5">
-        <Search size={14} className="text-slate-500 shrink-0" />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
-          placeholder="Tìm công cụ (vd: edge-tts, opencut, web speech)..."
-          className="flex-1 bg-transparent text-xs text-slate-300 placeholder-slate-500 outline-none"
-        />
-      </div>
+        {/* Main Content Area */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {/* Text Input Section */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <Type size={12} className="text-cyan-400" />
+                Nội dung văn bản
+              </label>
+              <div className="flex items-center gap-3 text-[10px] text-slate-500">
+                <span className="flex items-center gap-1"><Hash size={10} />{charCount}/1000</span>
+                <span className="flex items-center gap-1"><Type size={10} />{wordCount} từ</span>
+                <span className="flex items-center gap-1"><Clock size={10} />~{estimatedSeconds}s</span>
+              </div>
+            </div>
+            <div className="relative">
+              <textarea
+                ref={textareaRef}
+                value={text}
+                onChange={e => setText(e.target.value)}
+                placeholder="Nhập nội dung cần chuyển thành giọng nói..."
+                className="w-full h-40 p-4 bg-[#12131a] border border-white/10 rounded-2xl text-sm text-slate-200 placeholder-slate-500 outline-none resize-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/10 transition-all font-sans leading-relaxed"
+                maxLength={1000}
+              />
+            </div>
 
-      {/* TTS Status */}
-      <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#181920] border border-white/5">
-        <span className={`w-2 h-2 rounded-full ${ttsStatus?.edge_tts ? 'bg-emerald-400' : 'bg-rose-400'} animate-pulse`}></span>
-        <span className="text-xs text-slate-300">
-          Server TTS: <span className="text-emerald-300 font-medium">{ttsStatus?.edge_tts ? 'edge-tts (10 giọng VN) đã sẵn sàng' : 'không khả dụng'}</span>
-        </span>
-      </div>
-
-      {/* Tools Grid */}
-      {filteredTools.map((group, gi) => (
-        <div key={gi} className="space-y-3">
-          <div className="flex items-center gap-2 pb-1 border-b border-white/5">
-            {group.icon}
-            <h3 className="text-xs font-bold text-slate-300">{group.category}</h3>
+            {/* Quick Samples */}
+            <div className="flex gap-2 flex-wrap">
+              {QUICK_SAMPLES.map((sample, i) => (
+                <button
+                  key={i}
+                  onClick={() => setText(sample.text)}
+                  className="px-3 py-1.5 rounded-full bg-[#12131a] border border-white/5 text-[11px] text-slate-400 hover:text-cyan-300 hover:border-cyan-500/30 hover:bg-cyan-500/5 transition-all"
+                >
+                  {sample.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="grid gap-2.5">
-            {group.tools.map((tool, ti) => (
-              <div
-                key={ti}
-                className="p-3 bg-[#131417] rounded-xl border border-white/5 hover:border-cyan-500/20 transition-all"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-slate-200 truncate">{tool.name}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
-                        tool.status === 'ready'
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : tool.status === 'setup'
-                          ? 'bg-amber-500/20 text-amber-300'
-                          : 'bg-slate-500/20 text-slate-400'
-                      }`}>
-                        {tool.badge}
+          {/* Voice Selector - Compact Cards */}
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <Mic size={12} className="text-cyan-400" />
+              Chọn giọng đọc
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+              {VN_VOICES.map(v => {
+                const vc = VOICE_COLORS[v.color];
+                const isSelected = voice === v.id;
+                const isPreviewing = previewingVoice === v.id;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => setVoice(v.id)}
+                    className={`relative p-3 rounded-xl text-left transition-all border group ${
+                      isSelected
+                        ? `${vc.bg} ${vc.border} ring-2 ${vc.ring}`
+                        : 'bg-[#12131a] border-white/5 hover:border-white/15 hover:bg-white/5'
+                    }`}
+                  >
+                    {isSelected && (
+                      <span className={`absolute top-1.5 right-1.5 w-4 h-4 rounded-full ${vc.bg} flex items-center justify-center`}>
+                        <span className={`text-[8px] ${vc.text}`}>✓</span>
+                      </span>
+                    )}
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className={`w-7 h-7 rounded-lg ${vc.bg} flex items-center justify-center`}>
+                        <User size={12} className={vc.text} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className={`text-[11px] font-semibold truncate ${isSelected ? vc.text : 'text-slate-200'}`}>
+                          {v.label}
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handlePreviewVoice(v.id); }}
+                        className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${
+                          isPreviewing
+                            ? 'bg-red-500/20 text-red-400'
+                            : `${vc.bg} ${vc.text} opacity-0 group-hover:opacity-100`
+                        }`}
+                        title={isPreviewing ? 'Dừng' : 'Nghe thử'}
+                      >
+                        {isPreviewing ? <Pause size={10} /> : <Play size={10} className="ml-0.5" />}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-md ${vc.bg} ${vc.text}`}>
+                        {v.gender}
+                      </span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-white/5 text-slate-500 flex items-center gap-0.5">
+                        <MapPin size={7} />{v.region}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5 leading-tight">{tool.desc}</p>
-                  </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-                  <div className="flex items-center gap-1 ml-2 shrink-0">
-                    {tool.status === 'ready' && (
-                      <button
-                        onClick={() => {
-                          if (tool.id === 'edge-tts') {
-                            handleTTSTest();
-                          } else {
-                            showToast(`${tool.name}: sử dụng trong phần mềm`, 'success');
-                          }
-                        }}
-                        className="p-1 rounded-lg bg-cyan-500/20 text-cyan-300 hover:text-cyan-200 hover:bg-cyan-500/30 transition-all"
-                        title={tool.id === 'edge-tts' ? 'Thử giọng nói' : 'Sử dụng'}
-                      >
-                        <Play size={12} />
-                      </button>
-                    )}
-                    {tool.status === 'repo' && tool.repo && (
-                      <button
-                        onClick={() => handleCopyRepo(tool.repo, tool.name)}
-                        className="p-1 rounded-lg bg-slate-500/20 text-slate-400 hover:text-white hover:bg-slate-500/30 transition-all"
-                        title="Sao chép repo link"
-                      >
-                        {copiedLink === tool.name ? <Copy size={11} className="text-emerald-400" /> : <ExternalLink size={11} />}
-                      </button>
-                    )}
+          {/* Controls - Rate & Pitch */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-300">Tốc độ</label>
+                <span className="text-[11px] text-cyan-300 font-mono bg-cyan-500/10 px-2 py-0.5 rounded-md">{formatRate(rate)}</span>
+              </div>
+              <input type="range" min={-50} max={50} value={rate} onChange={e => setRate(parseInt(e.target.value))}
+                className="w-full h-2 bg-[#1e1f24] rounded-full appearance-none cursor-pointer accent-cyan-500" />
+              <div className="flex justify-between text-[9px] text-slate-600">
+                <span>Chậm</span><span>Bình thường</span><span>Nhanh</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-300">Cao độ</label>
+                <span className="text-[11px] text-purple-300 font-mono bg-purple-500/10 px-2 py-0.5 rounded-md">{formatPitch(pitch)}</span>
+              </div>
+              <input type="range" min={-50} max={50} value={pitch} onChange={e => setPitch(parseInt(e.target.value))}
+                className="w-full h-2 bg-[#1e1f24] rounded-full appearance-none cursor-pointer accent-purple-500" />
+              <div className="flex justify-between text-[9px] text-slate-600">
+                <span>Thấp</span><span>Bình thường</span><span>Cao</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Generate Button */}
+          <button
+            onClick={handleGenerate}
+            disabled={loading || !text.trim()}
+            className="w-full py-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-sm shadow-lg shadow-cyan-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2.5 active:scale-[0.98]"
+          >
+            {loading ? (
+              <><Loader2 size={18} className="animate-spin" /> Đang tạo audio...</>
+            ) : (
+              <><Volume2 size={18} /> Chuyển Thành Giọng Nói</>
+            )}
+          </button>
+
+          {/* Audio Player */}
+          {audioUrl && (
+            <div className="p-5 bg-[#12131a] rounded-2xl border border-emerald-500/20 space-y-3">
+              <audio ref={audioRef} src={audioUrl} preload="auto" className="hidden" />
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handlePlayPause}
+                  className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 hover:bg-emerald-500/30 transition-all shrink-0"
+                >
+                  {playing ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}
+                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-emerald-300">Audio đã tạo</div>
+                  <div className="text-[10px] text-slate-500 truncate">
+                    {selectedVoice?.label} • {formatRate(rate)} • {formatPitch(pitch)}
                   </div>
                 </div>
+                <button
+                  onClick={handleDownload}
+                  className="px-4 py-2.5 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5 hover:bg-emerald-500/30 transition-all active:scale-95"
+                >
+                  <Download size={14} /> Tải MP3
+                </button>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
-      ))}
+      </div>
+
+      {/* Right Panel - History */}
+      <div className={`w-64 border-l border-white/5 bg-[#0d0e12] flex flex-col ${showVoicePanel ? 'max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-50 max-md:w-72 max-md:bg-[#0d0e12]' : 'max-md:hidden'}`}>
+        <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+          <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Lịch sử</h3>
+          {history.length > 0 && (
+            <button
+              onClick={() => setHistory([])}
+              className="text-[10px] text-slate-600 hover:text-slate-400 flex items-center gap-1 transition-colors"
+            >
+              <RotateCw size={10} /> Xóa
+            </button>
+          )}
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {history.length === 0 ? (
+            <div className="text-center py-8">
+              <Clock size={24} className="text-slate-700 mx-auto mb-2" />
+              <p className="text-[10px] text-slate-600">Chưa có lịch sử</p>
+              <p className="text-[9px] text-slate-700 mt-1">Audio đã tạo sẽ xuất hiện ở đây</p>
+            </div>
+          ) : (
+            history.map((h, i) => (
+              <button
+                key={i}
+                onClick={() => playHistoryItem(h)}
+                className="w-full p-3 rounded-xl bg-[#12131a] border border-white/5 hover:border-white/15 text-left transition-all group"
+              >
+                <div className="text-[11px] text-slate-300 truncate group-hover:text-white transition-colors">{h.text}</div>
+                <div className="flex items-center justify-between mt-1.5">
+                  <span className="text-[9px] text-slate-500">{h.voice}</span>
+                  <span className="text-[9px] text-slate-600">{h.time}</span>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }

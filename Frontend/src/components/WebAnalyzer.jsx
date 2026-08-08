@@ -16,7 +16,7 @@ export default function WebAnalyzer({ apiFetch: apiFetchProp, showToast }) {
     setResult(null);
     try {
       const fetchFn = apiFetchProp || apiFetch;
-      const data = await fetchFn('/api/agent/web-analyze', {
+      const data = await fetchFn('/agent/web-analyze', {
         method: 'POST',
         body: JSON.stringify({ url: finalUrl })
       });
@@ -88,16 +88,16 @@ export default function WebAnalyzer({ apiFetch: apiFetchProp, showToast }) {
               <FileText size={14} className="text-cyan-400" /> {result.title || '(Không có title)'}
             </h3>
             <p className="text-xs text-slate-400 line-clamp-2">{result.metaDesc}</p>
-            {result.metaKeywords !== '(khong co)' && (
+            {result.metaKeywords !== '(không có)' && (
               <p className="text-[11px] text-slate-500">Keywords: {result.metaKeywords}</p>
             )}
           </div>
 
           {/* Scores */}
           <div className="grid grid-cols-3 gap-2">
-            <ScoreBadge label="SEO" value={result.score?.seo} color={result.score?.seo === 'Tot' ? 'green' : 'yellow'} />
-            <ScoreBadge label="Tốc độ" value={result.score?.speed} color={result.score?.speed === 'Nhanh' ? 'green' : result.score?.speed === 'Trung binh' ? 'yellow' : 'red'} />
-            <ScoreBadge label="Accessibility" value={result.score?.accessibility} color={result.score?.accessibility === 'Tot' ? 'green' : 'red'} />
+            <ScoreBadge label="SEO" value={result.score?.seo} color={result.score?.seo === 'Tốt' ? 'green' : 'yellow'} />
+            <ScoreBadge label="Tốc độ" value={result.score?.speed} color={result.score?.speed === 'Nhanh' ? 'green' : result.score?.speed === 'Trung bình' ? 'yellow' : 'red'} />
+            <ScoreBadge label="Accessibility" value={result.score?.accessibility} color={result.score?.accessibility === 'Tốt' ? 'green' : 'red'} />
           </div>
 
           {/* Stats */}

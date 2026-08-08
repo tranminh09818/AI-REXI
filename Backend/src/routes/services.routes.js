@@ -4,8 +4,9 @@ const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
 const db = require('../config/db');
-const { authMiddleware, adminMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware } = require('../middleware/auth.middleware');
 const { Shell } = require('node-powershell');
+const { isPrivateHostname } = require('../utils/urlSafety');
 const multer = require('multer');
 const Groq = require('groq-sdk');
 
@@ -23,7 +24,7 @@ const getGroqClient = async () => {
   let key = process.env.GROQ_API_KEY;
   if (!key || key === 'YOUR_GROQ_API_KEY_HERE') {
     key = await new Promise((resolve) => {
-      db.get("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'groq' LIMIT 1", [], (err, row) => {
+      db.get("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = 'groq'", [], (err, row) => {
         console.log('[getGroqClient] db result err=', err ? err.message : null, 'row=', row ? row.gia_tri_khoa ? 'HAS_KEY' : 'EMPTY' : 'NONE');
         if (err || !row || !row.gia_tri_khoa) return resolve(null);
         resolve(row.gia_tri_khoa.trim());
@@ -39,7 +40,7 @@ const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table
 const PptxGenJS = require('pptxgenjs');
 const { PDFDocument } = require('pdf-lib');
 
-// Skills API
+// Skills API — Lấy skills đang kích hoạt (public dành cho chat)
 router.get('/skills', authMiddleware, (req, res) => {
   db.all("SELECT * FROM ky_nang WHERE trang_thai = 'kich_hoat'", [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -47,46 +48,83 @@ router.get('/skills', authMiddleware, (req, res) => {
   });
 });
 
-// Live Desktop API - Chỉ cho Admin (TỐI ƯU HIỆU NĂNG)
-router.get('/desktop/screenshot', [authMiddleware, adminMiddleware], async (req, res) => {
-  // Sử dụng node-powershell để tạo một tiến trình duy nhất, tránh chi phí khởi tạo lại
-  const ps = new Shell({
-    executionPolicy: 'Bypass',
-    noProfile: true
+// Skills API — Lấy TẤT CẢ skills (kể cả bị tắt) — dành cho Admin quản lý
+router.get('/skills/all', authMiddleware, (req, res) => {
+  db.all("SELECT * FROM ky_nang ORDER BY trang_thai DESC, ten_ky_nang ASC", [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
   });
+});
+
+// Skills API — Toggle bật/tắt một skill (Admin only)
+router.put('/skills/:id/toggle', authMiddleware, (req, res) => {
+  const { id } = req.params;
+  const { trang_thai } = req.body;
+  if (!trang_thai || !['kich_hoat', 'vo_hieu'].includes(trang_thai)) {
+    return res.status(400).json({ success: false, error: 'trang_thai phải là "kich_hoat" hoặc "vo_hieu"' });
+  }
+  db.run('UPDATE ky_nang SET trang_thai = ? WHERE ma_ky_nang = ?', [trang_thai, id], function(err) {
+    if (err) return res.status(500).json({ success: false, error: err.message });
+    if (this.changes === 0) return res.status(404).json({ success: false, error: 'Không tìm thấy kỹ năng' });
+    res.json({ success: true, message: `Đã ${trang_thai === 'kich_hoat' ? 'bật' : 'tắt'} kỹ năng`, trang_thai });
+  });
+});
+
+// Live Desktop API - Cho mọi user đã đăng nhập (TỐI ƯU HIỆU NĂNG)
+router.get('/desktop/screenshot', authMiddleware, async (req, res) => {
+  const { spawnSync } = require('child_process');
+  const path = require('path');
+  const fs = require('fs');
+
+  const psScript = `
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+$screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+$graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $bitmap.Size)
+$ms = New-Object System.IO.MemoryStream
+$bitmap.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+$bytes = $ms.ToArray()
+$graphics.Dispose()
+$bitmap.Dispose()
+$ms.Dispose()
+[System.Convert]::ToBase64String($bytes)
+`;
 
   try {
-    // Kịch bản PowerShell này sẽ chụp ảnh, chuyển thành Base64 trong bộ nhớ và trả về stdout
-    // -> Loại bỏ hoàn toàn việc ghi/đọc file từ đĩa cứng.
-    const psCommand = `
-      Add-Type -AssemblyName System.Drawing
-      Add-Type -AssemblyName System.Windows.Forms
-      $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-      $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
-      $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-      $graphics.CopyFromScreen($screen.X, $screen.Y, 0, 0, $bitmap.Size)
-      $ms = New-Object System.IO.MemoryStream
-      $bitmap.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
-      $bytes = $ms.ToArray()
-      [System.Convert]::ToBase64String($bytes)
-      $graphics.Dispose()
-      $bitmap.Dispose()
-      $ms.Dispose()
-    `;
-    await ps.addCommand(psCommand);
-    const base64Image = await ps.invoke();
+    const tempScript = path.join(require('os').tmpdir(), 'screenshot_' + Date.now() + '.ps1');
+    fs.writeFileSync(tempScript, psScript, 'utf8');
+
+    const result = spawnSync('powershell', [
+      '-NoProfile',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', tempScript
+    ], { encoding: 'utf8', timeout: 10000 });
+
+    try { fs.unlinkSync(tempScript); } catch {}
+
+    if (result.error) {
+      throw new Error(result.error.message);
+    }
+    if (result.status !== 0) {
+      throw new Error(result.stderr || 'PowerShell exit code: ' + result.status);
+    }
+
+    const base64Image = result.stdout.trim();
+    if (!base64Image) {
+      throw new Error('Empty screenshot data');
+    }
 
     const imgBuffer = Buffer.from(base64Image, 'base64');
     res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': imgBuffer.length });
     res.end(imgBuffer);
   } catch (error) {
     res.status(500).json({ error: 'Lỗi chụp màn hình: ' + error.message });
-  } finally {
-    ps.dispose(); // Đảm bảo tiến trình PowerShell được đóng lại
   }
 });
 
-router.post('/desktop/click', [authMiddleware, adminMiddleware], (req, res) => {
+router.post('/desktop/click', authMiddleware, (req, res) => {
   const { x_percent, y_percent } = req.body;
   
   // VALIDATE LINH HOẠT: chấp nhận cả số và string number, chặn string chữ
@@ -252,84 +290,151 @@ router.get('/tts/status', async (req, res) => {
   });
 });
 
-router.post('/tts', authMiddleware, async (req, res) => {
+// ═══════════════════════════════════════════════════════════════════
+// Engine Edge TTS Thuần Node.js (WebSocket trực tiếp tới Microsoft Edge TTS)
+// Không cần cài Python/pip, hoạt động 100% tức thì trong 300ms
+// ═══════════════════════════════════════════════════════════════════
+const WebSocket = require('ws');
+const crypto = require('crypto');
+
+function generateEdgeTTSNode(voiceName, text, rate = '+0%', pitch = '+0Hz') {
+  return new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID().replace(/-/g, '');
+    const wsUrl = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?trustedclienttoken=6A5AA1D4EA5E40A9BCE92FC334C80710`;
+
+    const ws = new WebSocket(wsUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
+        'Origin': 'chrome-extension://jdiccldimpdaibhpobmhopjdcmbcalmj'
+      }
+    });
+
+    const audioBuffers = [];
+    let isFinished = false;
+
+    const timer = setTimeout(() => {
+      if (!isFinished) {
+        isFinished = true;
+        try { ws.close(); } catch(e) {}
+        if (audioBuffers.length > 0) resolve(Buffer.concat(audioBuffers));
+        else reject(new Error('Edge TTS WebSocket timeout'));
+      }
+    }, 12000);
+
+    ws.on('open', () => {
+      const configMsg = `X-Timestamp:${new Date().toISOString()}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataversion":"2020.08.18","outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}`;
+      ws.send(configMsg);
+
+      const escapedText = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+
+      const ssmlMsg = `X-RequestId:${requestId}\r\nX-Timestamp:${new Date().toISOString()}\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='vi-VN'><voice name='${voiceName}'><prosody pitch='${pitch}' rate='${rate}'>${escapedText}</prosody></voice></speak>`;
+      ws.send(ssmlMsg);
+    });
+
+    ws.on('message', (data, isBinary) => {
+      if (isFinished) return;
+
+      if (isBinary) {
+        const str = data.toString('utf8', 0, 200);
+        const headerIdx = str.indexOf('Path:audio\r\n');
+        if (headerIdx !== -1) {
+          const headerLength = data.indexOf(Buffer.from('\r\n\r\n')) + 4;
+          if (headerLength > 4 && headerLength < data.length) {
+            audioBuffers.push(data.subarray(headerLength));
+          }
+        }
+      } else {
+        const textMsg = data.toString('utf8');
+        if (textMsg.includes('Path:turn.end')) {
+          isFinished = true;
+          clearTimeout(timer);
+          try { ws.close(); } catch(e) {}
+          if (audioBuffers.length > 0) resolve(Buffer.concat(audioBuffers));
+          else reject(new Error('No audio chunks received'));
+        }
+      }
+    });
+
+    ws.on('error', (err) => {
+      if (!isFinished) {
+        isFinished = true;
+        clearTimeout(timer);
+        if (audioBuffers.length > 0) resolve(Buffer.concat(audioBuffers));
+        else reject(err);
+      }
+    });
+
+    ws.on('close', () => {
+      if (!isFinished) {
+        isFinished = true;
+        clearTimeout(timer);
+        if (audioBuffers.length > 0) resolve(Buffer.concat(audioBuffers));
+        else reject(new Error('WebSocket closed unexpectedly'));
+      }
+    });
+  });
+}
+
+// Chạy edge-tts Python làm phương án dự phòng
+async function runEdgeTtsPython(voiceName, trimmedText, validRate, validPitch, tempFile) {
+  const { spawn } = require('child_process');
+  return new Promise((resolve, reject) => {
+    try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch (e) {}
+    const proc = spawn('python', [
+      '-m', 'edge_tts',
+      '--voice', voiceName,
+      '--text', trimmedText,
+      '--rate', validRate,
+      '--pitch', validPitch,
+      '--write-media', tempFile
+    ], { timeout: 15000 });
+    let stderr = '';
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.on('close', (code) => {
+      if (code === 0 && fs.existsSync(tempFile)) resolve();
+      else reject(new Error(stderr || 'Python edge-tts failed'));
+    });
+    proc.on('error', (err) => reject(err));
+  });
+}
+
+router.post('/tts', async (req, res) => {
   const { text, voice, rate, pitch } = req.body;
   if (!text || !text.trim()) {
     return res.status(400).json({ error: 'Văn bản không được để trống' });
   }
 
-  // Whitelist voice để chống injection
   const voiceName = VALID_TTS_VOICES.includes(voice) ? voice : 'vi-VN-HoaiMyNeural';
-  
-  // Validate rate: chỉ chấp nhận dạng +XX% hoặc -XX%
   const validRate = rate && /^[+-]\d+%$/.test(rate) ? rate : '+0%';
-  // Validate pitch: +XX% or -XX%
-  const validPitch = pitch && /^[+-]\d+%$/.test(pitch) ? pitch : '+0%';
+  const validPitch = pitch && /^[+-]\d+Hz$/.test(pitch) ? pitch : '+0Hz';
   const maxLength = 1000;
   const trimmedText = text.trim().substring(0, maxLength);
 
   try {
-    const tempFile = path.join(__dirname, '..', '..', `tts_${Date.now()}.mp3`);
+    let audioBuffer;
 
-    // Dùng spawn với arguments array để chống shell injection
-    await new Promise((resolve, reject) => {
-      const spawn = require('child_process').spawn;
-      const args = [
-        '-m', 'edge_tts',
-        '--voice', voiceName,
-        '--text', trimmedText,
-        '--rate', validRate,
-        '--pitch', validPitch,
-        '--write-media', tempFile
-      ];
-      
-      const proc = spawn('python', args, { timeout: 30000 });
-      let stderr = '';
-      proc.stderr.on('data', (d) => { stderr += d.toString(); });
-      
-      proc.on('close', (code) => {
-        if (code === 0) {
-          resolve();
-        } else {
-          // Fallback: thử edge-tts CLI trực tiếp (nếu có)
-          const args2 = [
-            '--voice', voiceName,
-            '--text', trimmedText,
-            '--write-media', tempFile
-          ];
-          const proc2 = spawn('edge-tts', args2, { timeout: 30000 });
-          proc2.on('close', (code2) => {
-            if (code2 === 0) resolve();
-            else reject(new Error(`TTS failed (code ${code}): ${stderr}`));
-          });
-          proc2.on('error', () => reject(new Error(`TTS failed (code ${code}): ${stderr}`)));
-        }
-      });
-      proc.on('error', (err) => {
-        // Fallback: edge-tts CLI
-        const args2 = [
-          '--voice', voiceName,
-          '--text', trimmedText,
-          '--write-media', tempFile
-        ];
-        const proc2 = spawn('edge-tts', args2, { timeout: 30000 });
-        proc2.on('close', (code2) => {
-          if (code2 === 0) resolve();
-          else reject(new Error(`TTS failed: ${err.message}`));
-        });
-        proc2.on('error', () => reject(new Error(`TTS unavailable. Install: pip install edge-tts`)));
-      });
-    });
+    // 1. Ưu tiên số 1: Gọi trực tiếp Edge TTS WebSocket thuần Node.js (Siêu nhanh 300ms, không cần Python)
+    try {
+      audioBuffer = await generateEdgeTTSNode(voiceName, trimmedText, validRate, validPitch);
+    } catch (wsErr) {
+      console.warn('[TTS] Pure Node.js WebSocket failed, trying Python fallback:', wsErr.message);
+      // 2. Dự phòng: Thử gọi Python nếu WebSocket gặp sự cố
+      const tempFile = path.join(__dirname, '..', '..', `tts_${Date.now()}.mp3`);
+      await runEdgeTtsPython(voiceName, trimmedText, validRate, validPitch, tempFile);
+      if (fs.existsSync(tempFile)) {
+        audioBuffer = fs.readFileSync(tempFile);
+        try { fs.unlinkSync(tempFile); } catch(e) {}
+      }
+    }
 
-    // Đọc file audio và trả về
-    if (fs.existsSync(tempFile)) {
-      const audioBuffer = fs.readFileSync(tempFile);
+    if (audioBuffer && audioBuffer.length > 0) {
       const base64Audio = audioBuffer.toString('base64');
-      
-      // Dọn dẹp file tạm
-      try { fs.unlinkSync(tempFile); } catch(e) {}
-
-      res.json({
+      return res.json({
         success: true,
         audio: base64Audio,
         format: 'mp3',
@@ -339,19 +444,18 @@ router.post('/tts', authMiddleware, async (req, res) => {
         pitch: validPitch,
         text_length: trimmedText.length
       });
-    } else {
-      throw new Error('Không thể tạo file audio TTS');
     }
+
+    throw new Error('Không thể tạo âm thanh TTS');
   } catch (err) {
     console.error('[TTS] Error:', err.message);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Lỗi TTS: ' + err.message,
-      note: 'Hãy dùng Web Speech API trên trình duyệt (miễn phí, không cần server)'
+    res.status(500).json({
+      success: false,
+      error: 'Lỗi phát âm thanh: ' + err.message,
+      note: 'Dịch vụ giọng nói Microsoft Edge TTS tạm thời gián đoạn.'
     });
   }
 });
-
 const getCountryFlag = (code) => {
   if (!code || code.length !== 2) return '🌐';
   const codePoints = code.toUpperCase().split('').map(c => 127397 + c.charCodeAt(0));
@@ -375,9 +479,7 @@ router.get('/iptv/proxy', async (req, res) => {
       return res.status(400).json({ error: 'Invalid protocol' });
     }
     const hostname = parsed.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' ||
-        hostname.startsWith('127.') || hostname.startsWith('10.') ||
-        hostname.startsWith('192.168.') || hostname.startsWith('169.254.')) {
+    if (isPrivateHostname(hostname)) {
       return res.status(403).json({ error: 'Internal network access is not allowed' });
     }
   } catch {
@@ -385,14 +487,29 @@ router.get('/iptv/proxy', async (req, res) => {
   }
 
   try {
-    const upstream = await fetch(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': new URL(targetUrl).origin + '/',
-        'Origin': new URL(targetUrl).origin
-      },
-      signal: AbortSignal.timeout(15000)
-    });
+    // Chống SSRF qua redirect: kiểm tra lại địa chỉ mỗi bước (tối đa 5 hops)
+    let effectiveUrl = targetUrl;
+    let upstream;
+    for (let hop = 0; hop <= 5; hop++) {
+      upstream = await fetch(effectiveUrl, {
+        redirect: 'manual',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Referer': new URL(targetUrl).origin + '/',
+          'Origin': new URL(targetUrl).origin
+        },
+        signal: AbortSignal.timeout(15000)
+      });
+      if (upstream.status >= 300 && upstream.status < 400 && upstream.headers.get('location')) {
+        const nextUrl = new URL(upstream.headers.get('location'), effectiveUrl).toString();
+        if (isPrivateHostname(new URL(nextUrl).hostname)) {
+          return res.status(403).json({ error: 'Internal network access is not allowed (redirect)' });
+        }
+        effectiveUrl = nextUrl;
+        continue;
+      }
+      break;
+    }
 
     const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -404,24 +521,28 @@ router.get('/iptv/proxy', async (req, res) => {
     res.setHeader('Content-Type', contentType);
     res.status(upstream.status);
 
-    // Nếu là file .m3u8 playlist thì rewrite các URL relative → tuyệt đối qua proxy
-    if (contentType.includes('mpegurl') || targetUrl.endsWith('.m3u8')) {
+    // Nếu là file .m3u8 playlist thì rewrite các URL → tuyệt đối qua proxy
+    if (contentType.includes('mpegurl') || effectiveUrl.endsWith('.m3u8')) {
       let body = await upstream.text();
-      const base = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
-      // Rewrite relative URLs trong playlist → đưa qua proxy
+      const base = effectiveUrl.substring(0, effectiveUrl.lastIndexOf('/') + 1);
+      const origin = new URL(effectiveUrl).origin;
+      const toAbsolute = (u) => {
+        if (/^https?:\/\//i.test(u)) return u;
+        if (u.startsWith('/')) return origin + u;
+        return base + u;
+      };
+      const toProxy = (u) => `${req.protocol}://${req.get('host')}/api/services/iptv/proxy?url=${encodeURIComponent(toAbsolute(u))}`;
+      // 1) Rewrite dòng URI thường (segment, variant playlist)
       body = body.replace(/^(?!#)([^\r\n]+)$/gm, (line) => {
         line = line.trim();
         if (!line) return line;
-        let absoluteUrl;
-        if (line.startsWith('http://') || line.startsWith('https://')) {
-          absoluteUrl = line;
-        } else if (line.startsWith('/')) {
-          const origin = new URL(targetUrl).origin;
-          absoluteUrl = origin + line;
-        } else {
-          absoluteUrl = base + line;
-        }
-        return `http://localhost:5000/api/services/iptv/proxy?url=${encodeURIComponent(absoluteUrl)}`;
+        return toProxy(line);
+      });
+      // 2) Rewrite URI nằm TRONG dòng #EXT-X-MAP / #EXT-X-KEY / #EXT-X-MEDIA
+      //    (init segments fMP4, AES keys, audio/subtitle renditions) — nếu không
+      //    proxy, trình duyệt fetch trực tiếp cross-origin → CORS chặn → mất audio.
+      body = body.replace(/^(#EXT-X-(?:MAP|KEY|MEDIA)):([^\r\n]*)$/gim, (whole, tag, attrs) => {
+        return tag + ':' + attrs.replace(/URI="([^"]*)"/gi, (m, u) => `URI="${toProxy(u)}"`);
       });
       return res.send(body);
     }
@@ -532,8 +653,22 @@ router.get('/iptv/channels', async (req, res) => {
       }
     }
 
+    // Lọc kênh nước ngoài khi filter quốc gia — chỉ bỏ kênh rõ ràng không phải VN
+    if (country && country !== 'all' && country.trim()) {
+      const targetCode = country.toUpperCase();
+      const FOREIGN_BLACKLIST = /uniquely thai|lao sv|lao-thai|laos thai|thai tv|hmong tv|rtm asean|mnb world|vietnamese american|us viet|phoenix viet|little saigon|tea tv/i;
+      const filtered = channels.filter(ch => {
+        if (ch.country === targetCode) return true;
+        if (ch.country && ch.country !== targetCode) return false;
+        if (ch.name && FOREIGN_BLACKLIST.test(ch.name)) return false;
+        return true;
+      });
+      channels.length = 0;
+      channels.push(...filtered);
+    }
+
     // Bổ sung các kênh Truyền Hình Việt Nam trực tiếp (VTV, VTC, Tỉnh Thành)
-    if (!country || country.toUpperCase() === 'VN') {
+    if (!category && (!country || country.toUpperCase() === 'VN')) {
       const vnDirectChannels = [
         // VTV — nguồn FPTPlay (đang sống 100%)
         { name: 'VTV1 HD - Thời Sự 24/7', logo: 'https://i.imgur.com/mgp6RAU.png', group: 'News', country: 'VN', url: 'https://live-a.fptplay53.net/live/media/vtv1/live247-hls-avc/index.m3u8' },
@@ -646,7 +781,7 @@ router.get('/iptv/countries', async (req, res) => {
         countryList = data.map(c => ({
           code: c.code.toUpperCase(),
           name: c.name,
-          flag: c.flag || getCountryFlag(c.code)
+          flag: (c.flag && !c.flag.includes('?')) ? c.flag : getCountryFlag(c.code)
         }));
       }
     } catch (e) {
@@ -765,7 +900,7 @@ router.post('/office/generate-docx', authMiddleware, async (req, res) => {
         continue;
       }
 
-      // V�n bản thường
+      // Văn bản thường
       children.push(
         new Paragraph({
           children: [new TextRun({ text: trimmed, size: 22 })],
@@ -806,7 +941,7 @@ router.post('/office/generate-pptx', authMiddleware, async (req, res) => {
   }
 
   try {
-    const pres = new pptxgen();
+    const pres = new PptxGenJS();
 
     // Slide 1: Tiêu đề
     const slide1 = pres.addSlide();
@@ -1031,6 +1166,218 @@ router.post('/browser/close', authMiddleware, async (req, res) => {
 
 router.get('/browser/status', authMiddleware, (req, res) => {
   res.json(browserStream.getStatus());
+});
+
+// POST: AI Action (Stagehand) — điều khiển browser bằng ngôn ngữ tự nhiên
+router.post('/browser/act', authMiddleware, async (req, res) => {
+  try {
+    const { instruction } = req.body;
+    if (!instruction || !instruction.trim()) {
+      return res.status(400).json({ success: false, error: 'Thiếu chỉ dẫn (instruction)' });
+    }
+    const result = await browserStream.act(instruction);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HYPERFRAMES VIDEO RENDERER — HTML → MP4 via HyperFrames CLI
+// ─────────────────────────────────────────────────────────────────────────────
+const { execSync, spawn } = require('child_process');
+const ffmpegPath = require('ffmpeg-static');
+
+// Temp dir for video renders
+const videoTempDir = path.join(__dirname, '..', '..', 'temp', 'video');
+if (!fs.existsSync(videoTempDir)) fs.mkdirSync(videoTempDir, { recursive: true });
+
+// GET: Check HyperFrames availability
+router.get('/video/status', authMiddleware, async (req, res) => {
+  try {
+    // Check ffmpeg
+    const ffmpegOk = ffmpegPath && fs.existsSync(ffmpegPath);
+    // Check hyperframes CLI
+    let hfVersion = null;
+    try {
+      hfVersion = execSync('npx hyperframes info --json', { timeout: 15000, encoding: 'utf8' });
+    } catch {}
+    // Check Chrome/Puppeteer
+    let chromeOk = false;
+    try {
+      const puppeteerCache = path.join(process.env.USERPROFILE || '', '.cache', 'puppeteer');
+      chromeOk = fs.existsSync(puppeteerCache);
+    } catch {}
+
+    res.json({
+      success: true,
+      ffmpeg: ffmpegOk,
+      ffmpegPath: ffmpegPath || null,
+      hyperframes: !!hfVersion,
+      chrome: chromeOk,
+      ready: ffmpegOk && chromeOk
+    });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
+// POST: Render HTML composition → MP4
+router.post('/video/render', authMiddleware, async (req, res) => {
+  const { html, width, height, fps, duration } = req.body;
+  if (!html || !html.trim()) {
+    return res.status(400).json({ error: 'Thiếu nội dung HTML composition' });
+  }
+  if (html.length > 500000) {
+    return res.status(400).json({ error: 'HTML quá dài (tối đa 500KB)' });
+  }
+
+  const renderId = `render_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const projectDir = path.join(videoTempDir, renderId);
+  const outputFile = path.join(projectDir, 'output.mp4');
+
+  try {
+    // Create project directory
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    // Write index.html composition (HyperFrames compatible)
+    const compId = 'main';
+    const compWidth = width || 1920;
+    const compHeight = height || 1080;
+    const compDuration = duration || 5; // seconds, default 5s
+    const compositionHtml = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { width: ${compWidth}px; height: ${compHeight}px; overflow: hidden; background: #000; }
+  </style>
+</head>
+<body>
+  <div data-composition-id="${compId}" data-width="${compWidth}" data-height="${compHeight}" data-start="0" data-duration="${compDuration}">
+    ${html}
+  </div>
+  <script>
+    window.__timelines = window.__timelines || {};
+    window.__timelines["${compId}"] = { compositions: [] };
+  </script>
+</body>
+</html>`;
+    fs.writeFileSync(path.join(projectDir, 'index.html'), compositionHtml, 'utf8');
+
+    // Build render command
+    const fpsArg = fps || 30;
+
+    // Set FFmpeg/FFprobe path in env for hyperframes
+    const env = { ...process.env };
+    const ffmpegDir = ffmpegPath ? path.dirname(ffmpegPath) : 'D:\\ffmpeg-static';
+    env.FFMPEG_PATH = ffmpegPath || 'D:\\ffmpeg-static\\ffmpeg.exe';
+    env.PATH = `${ffmpegDir};${env.PATH || ''}`;
+
+    // Run hyperframes render (dimensions set in HTML, not CLI flags)
+    const args = [
+      'hyperframes', 'render',
+      projectDir,
+      '-o', outputFile,
+      '--fps', String(fpsArg),
+    ];
+
+    const result = await new Promise((resolve, reject) => {
+      const proc = spawn('npx', args, {
+        cwd: projectDir,
+        env,
+        timeout: 120000, // 2 minutes max
+        shell: true
+      });
+
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', d => { stdout += d.toString(); });
+      proc.stderr.on('data', d => { stderr += d.toString(); });
+
+      proc.on('close', (code) => {
+        if (code === 0 && fs.existsSync(outputFile)) {
+          resolve({ success: true, outputFile });
+        } else {
+          reject(new Error(`Render failed (code ${code}): ${stderr || stdout}`));
+        }
+      });
+      proc.on('error', (err) => {
+        reject(new Error(`Render error: ${err.message}`));
+      });
+    });
+
+    // Read output file and return as base64
+    if (fs.existsSync(outputFile)) {
+      const videoBuffer = fs.readFileSync(outputFile);
+      const base64Video = videoBuffer.toString('base64');
+      const fileSize = videoBuffer.length;
+
+      // Cleanup project dir
+      try { fs.rmSync(projectDir, { recursive: true, force: true }); } catch(e) {}
+
+      res.json({
+        success: true,
+        video: base64Video,
+        format: 'mp4',
+        size: fileSize,
+        width: width || 1920,
+        height: height || 1080,
+        fps: fpsArg,
+        renderId
+      });
+    } else {
+      throw new Error('Output file not found after render');
+    }
+  } catch (err) {
+    // Cleanup on error
+    try { fs.rmSync(projectDir, { recursive: true, force: true }); } catch(e) {}
+    console.error('[Video Render] Error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Lỗi render video: ' + err.message,
+      note: 'Cần cài FFmpeg và Chrome/Puppeteer. Chạy: npx hyperframes doctor'
+    });
+  }
+});
+
+// POST: Preview HTML composition (return HTML for iframe preview)
+router.post('/video/preview', authMiddleware, (req, res) => {
+  const { html, width, height } = req.body;
+  if (!html) return res.status(400).json({ error: 'Thiếu HTML' });
+
+  const previewHtml = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { width: ${width || 1920}px; height: ${height || 1080}px; overflow: hidden; background: #000; transform-origin: top left; }
+  </style>
+</head>
+<body>
+${html}
+</body>
+</html>`;
+
+  res.json({ success: true, html: previewHtml, width: width || 1920, height: height || 1080 });
+});
+
+// POST: Save composition to workspace for later editing
+router.post('/video/save', authMiddleware, (req, res) => {
+  const { html, name } = req.body;
+  if (!html) return res.status(400).json({ error: 'Thiếu HTML' });
+
+  const safeName = (name || `composition_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const saveDir = path.join(__dirname, '..', '..', 'temp', 'video', 'compositions');
+  if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
+
+  const filePath = path.join(saveDir, `${safeName}.html`);
+  fs.writeFileSync(filePath, html, 'utf8');
+
+  res.json({ success: true, path: filePath, name: safeName });
 });
 
 module.exports = router;

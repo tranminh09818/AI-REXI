@@ -6,12 +6,17 @@ const fs = require('fs');
 const { exec, execSync, spawn } = require('child_process');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const db = require('../config/db');
+const { stripAnsi, AnsiStreamCleaner } = require('../utils/stripAnsi');
 const { authMiddleware, adminMiddleware, guestMiddleware, guestAgentMiddleware, getGuestLimits } = require('../middleware/auth.middleware');
 const { GUEST_USER_ID } = require('../ensure-admin');
 
 // --- CONFIGURATION ---
 const OPENCODE_BIN_PATH = process.env.OPENCODE_BIN_PATH || (process.env.USERPROFILE ? require("path").join(process.env.USERPROFILE, ".opencode", "bin", "opencode.exe") : "");
 const IS_OPENCODE_AVAILABLE = fs.existsSync(OPENCODE_BIN_PATH);
+
+// Env chuẩn cho mọi spawn opencode/agent: tắt màu ANSI ở NGUỒN để tránh rò rỉ mã "[[35m..." vào chat.
+// (stripAnsi + AnsiStreamCleaner ở các handler là lớp an toàn phụ khi tool vẫn phun mã màu.)
+const NO_COLOR_ENV = { ...process.env, LANG: 'en_US.UTF-8', NO_COLOR: '1', FORCE_COLOR: '0', TERM: 'dumb', CLICOLOR: '0', CLICOLOR_FORCE: '0' };
 
 // --- CACHING FOR MODELS ---
 const modelCache = new Map();
@@ -33,7 +38,7 @@ setInterval(() => {
 }, 30 * 60 * 1000); // Cleanup mỗi 30 phút
 
 function getModelCacheKey(provider, apiKey, baseUrl) {
-    if (provider === 'ollama' || provider === 'opencode') {
+    if (provider === 'opencode') {
         return `${provider}:${baseUrl || 'default'}`;
     }
     if (!apiKey) return null;
@@ -185,6 +190,13 @@ router.delete('/admin/conversations/:id/permanent', [authMiddleware, adminMiddle
 });
 
 router.get('/keys', [authMiddleware, adminMiddleware], (req, res) => {
+  // Xóa dứt điểm các provider đã loại bỏ khỏi CSDL
+  const REMOVED = ['bazaarlink', 'kiraai', 'ollama', 'freellmapi', 'tokenrouter'];
+  const ph = REMOVED.map(() => '?').join(',');
+  db.run(`DELETE FROM khoa_api WHERE LOWER(ten_nha_cung_cap) IN (${ph})`, REMOVED);
+  db.run(`DELETE FROM model_scan_cache WHERE LOWER(ma_nha_cung_cap) IN (${ph})`, REMOVED);
+  db.run(`UPDATE ai_models SET kich_hoat = 0 WHERE LOWER(ma_nha_cung_cap) IN (${ph})`, REMOVED);
+
   db.all("SELECT ma_khoa, ten_nha_cung_cap, gia_tri_khoa FROM khoa_api", [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     // CHE DẤU API KEY: an toàn với mọi độ dài key
@@ -233,7 +245,7 @@ router.post('/fetch-models', authMiddleware, async (req, res) => {
   }
 
   // 2. Proceed to fetch if not in cache or expired
-  if (!api_key && !['ollama', 'opencode'].includes(provider)) {
+  if (!api_key && !['opencode'].includes(provider)) {
     return res.status(400).json({ error: 'Vui lòng nhập API Key để quét models.' });
   }
 
@@ -324,20 +336,6 @@ router.post('/fetch-models', authMiddleware, async (req, res) => {
         modelsList = ['gpt-4o', 'gpt-4o-mini', 'o1-mini', 'DeepSeek-R1', 'DeepSeek-V3', 'meta-llama-3.1-405b-instruct', 'Phi-3-medium-instruct'];
       }
 
-    } else if (provider === 'freellmapi') {
-      const cleanedBase = (base_url || 'http://localhost:8080/v1').replace(/\/+$/, '');
-      const endpoint = cleanedBase.endsWith('/models') ? cleanedBase : cleanedBase + '/models';
-      const headers = api_key && api_key.trim() ? { 'Authorization': 'Bearer ' + api_key.trim() } : {};
-      const resp = await fetch(endpoint, { headers });
-      const data = await resp.json();
-      if (data.data && Array.isArray(data.data)) {
-        modelsList = data.data.map(m => m.id);
-      } else if (Array.isArray(data)) {
-        modelsList = data.map(m => m.id || m.name || m);
-      } else if (data.error) {
-        return res.json({ success: false, error: 'FreeLLMAPI: ' + (data.error.message || JSON.stringify(data.error)) });
-      }
-
     } else if (provider === 'custom') {
       const cleanedBase = (base_url || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
       const endpoint = cleanedBase.endsWith('/models') ? cleanedBase : cleanedBase + '/models';
@@ -353,13 +351,6 @@ router.post('/fetch-models', authMiddleware, async (req, res) => {
         return res.json({ success: false, error: 'Custom: ' + (data.error.message || JSON.stringify(data.error)) });
       }
 
-    } else if (provider === 'ollama') {
-      const endpoint = (base_url || 'http://localhost:11434').replace(/\/+$/, '') + '/api/tags';
-      const resp = await fetch(endpoint);
-      const data = await resp.json();
-      if (data.models && Array.isArray(data.models)) {
-        modelsList = data.models.map(m => m.name);
-      }
     } else if (provider === 'opencode') {
       try {
         if (!IS_OPENCODE_AVAILABLE) throw new Error('OpenCode binary not found.');
@@ -436,18 +427,48 @@ function taoTieuDeThongMinh(noiDungUser) {
   return clean || "Trò chuyện mới";
 }
 
+function cleanAIThinkingProcess(text) {
+  if (!text || typeof text !== 'string') return text;
+  let cleaned = text;
+
+  // 1. Loại bỏ các thẻ suy luận <think>...</think>
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  // 2. Loại bỏ đoạn nháp suy luận bằng tiếng Anh "Here's a thinking process: ..."
+  if (/Here'?s a thinking process:/i.test(cleaned)) {
+    const finalMatch = cleaned.match(/(?:Output matches draft|Final Output|Output):\s*([✅\s\S]+)$/i);
+    if (finalMatch && finalMatch[1]) {
+      cleaned = finalMatch[1].replace(/^[✅\s]+/, '').trim();
+    } else {
+      const draftMatch = cleaned.match(/Draft:\s*"([^"]+)"/i);
+      if (draftMatch && draftMatch[1]) {
+        cleaned = draftMatch[1].trim();
+      } else {
+        const parts = cleaned.split(/\n\n+/);
+        const nonThinkingParts = parts.filter(p => !/Here'?s a thinking process:/i.test(p) && !/^\d+\.\s*\*\*/.test(p.trim()));
+        if (nonThinkingParts.length > 0) {
+          cleaned = nonThinkingParts.join('\n\n').trim();
+        }
+      }
+    }
+  }
+
+  return cleaned || text;
+}
+
 function saveAIMessageAndRespond(maHoiThoai, content, res) {
+  const cleanContent = cleanAIThinkingProcess(content);
   const maTinNhanAI = crypto.randomUUID();
   db.run(
     "INSERT INTO tin_nhan (ma_tin_nhan, ma_hoi_thoai, vai_tro, noi_dung) VALUES (?, ?, 'assistant', ?)",
-    [maTinNhanAI, maHoiThoai, content],
+    [maTinNhanAI, maHoiThoai, cleanContent],
     (err) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({
         ma_tin_nhan: maTinNhanAI,
         ma_hoi_thoai: maHoiThoai,
         vai_tro: 'assistant',
-        noi_dung: content
+        noi_dung: cleanContent
       });
     }
   );
@@ -530,18 +551,18 @@ router.post('/conversations/:id/messages', (req, res, next) => {
         const agentProcess = spawn(
           OPENCODE_BIN_PATH,
           ['run', noi_dung, '-m', opencodeModel, '--auto'],
-          { cwd: rootDir, timeout: 300000, env: { ...process.env, LANG: 'en_US.UTF-8' } }
+          { cwd: rootDir, timeout: 300000, env: NO_COLOR_ENV }
         );
 
         let stdout = '';
         let stderr = '';
-        agentProcess.stdout.on('data', (data) => stdout += data);
-        agentProcess.stderr.on('data', (data) => stderr += data);
+        agentProcess.stdout.on('data', (data) => { stdout += stripAnsi(data.toString()); });
+        agentProcess.stderr.on('data', (data) => { stderr += stripAnsi(data.toString()); });
 
         return agentProcess.on('close', (code) => {
           let cauTraLoiAgent = "";
           if (code !== 0) {
-            cauTraLoiAgent = stdout.trim() || stderr || `[Agent Error] Process exited with code ${code}`;
+            cauTraLoiAgent = stdout.trim() || stderr.trim() || `[Agent Error] Process exited with code ${code}`;
           } else {
             cauTraLoiAgent = stdout.trim() || "Tôi đã tự động thực thi các câu lệnh và cập nhật tệp tin thành công cho bạn.";
           }
@@ -564,18 +585,16 @@ router.post('/conversations/:id/messages', (req, res, next) => {
       }
 
       // Ưu tiên lấy API key:
-      // 1. Client gửi lên (client_api_key)
-      // 2. DB lưu của ĐÚNG provider đang dùng
+      // 1. CSDL khoa_api lưu bởi Admin cho đúng provider
+      // 2. Client gửi lên (client_api_key)
       // 3. Env var GEMINI_API_KEY (nếu provider là gemini)
-      // 4. Nếu vẫn không có → fallback OpenCode (nếu đã cài)
-      // ❌ KHÔNG BAO GIỜ lấy key của provider khác để tránh nhầm model/quota
-      if (!keyToUse) {
-        const dbKeyRow = await new Promise((resDb) => {
-          db.get("SELECT gia_tri_khoa FROM khoa_api WHERE ten_nha_cung_cap = ?", [selectedProvider], (err, r) => resDb(r));
-        });
-        if (dbKeyRow && dbKeyRow.gia_tri_khoa) {
-          keyToUse = dbKeyRow.gia_tri_khoa;
-        }
+      const dbKeyRow = await new Promise((resDb) => {
+        db.get("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = LOWER(?)", [selectedProvider], (err, r) => resDb(r));
+      });
+      if (dbKeyRow && dbKeyRow.gia_tri_khoa && dbKeyRow.gia_tri_khoa.trim()) {
+        keyToUse = dbKeyRow.gia_tri_khoa.trim();
+      } else if (client_api_key && client_api_key.trim()) {
+        keyToUse = client_api_key.trim();
       }
 
       // Fetch base_url from ai_providers table for custom providers
@@ -588,7 +607,7 @@ router.post('/conversations/:id/messages', (req, res, next) => {
         keyToUse = process.env.GEMINI_API_KEY;
       }
 
-      if (!keyToUse && !['ollama', 'opencode', 'freellmapi'].includes(selectedProvider)) {
+      if (!keyToUse && !['opencode'].includes(selectedProvider)) {
         // Fallback: nếu đã cài opencode.exe, cho phép dùng miễn phí thay vì chặn
         if (IS_OPENCODE_AVAILABLE) {
           selectedProvider = 'opencode';
@@ -722,10 +741,10 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
                   const fallbackProcess = spawn(
                     OPENCODE_BIN_PATH,
                     ['run', noi_dung, '--auto'],
-                    { cwd: rootDir, timeout: 20000, env: { ...process.env, LANG: 'en_US.UTF-8' } }
+                    { cwd: rootDir, timeout: 20000, env: NO_COLOR_ENV }
                   );
                   let stdout = '';
-                  fallbackProcess.stdout.on('data', data => stdout += data);
+                  fallbackProcess.stdout.on('data', data => { stdout += stripAnsi(data.toString()); });
                   fallbackProcess.on('close', () => {
                       cauTraLoiAI = stdout.trim() || `[OpenCode Fallback] Đã thử thực thi tác vụ.`;
                       resOp();
@@ -740,31 +759,15 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
               }
             }
 
-          } else if (['openai', 'deepseek', 'groq', 'github', 'freellmapi', 'ollama', 'custom', 'omniroute', 'kiraai', 'bazaarlink'].includes(selectedProvider)) {
+          } else if (['openai', 'deepseek', 'groq', 'github', 'custom'].includes(selectedProvider)) {
             let endpoint = "https://api.openai.com/v1/chat/completions";
-            if (selectedProvider === 'omniroute') {
-              const defaultOmni = process.env.OMNIROUTE_BASE_URL || "http://localhost:20128/v1";
-              const cleanedBase = (baseUrl || defaultOmni).replace(/\/+$/, '');
-              endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-            } else if (selectedProvider === 'deepseek') endpoint = "https://api.deepseek.com/chat/completions";
+            if (selectedProvider === 'deepseek') endpoint = "https://api.deepseek.com/chat/completions";
             else if (selectedProvider === 'groq') endpoint = "https://api.groq.com/openai/v1/chat/completions";
             else if (selectedProvider === 'github') endpoint = "https://models.github.ai/inference/chat/completions";
-            else if (selectedProvider === 'kiraai') {
-              const cleanedBase = (baseUrl || "https://kiraai.vn/api/v1").replace(/\/+$/, '');
-              endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-            }
-            else if (selectedProvider === 'bazaarlink') {
-              const cleanedBase = (baseUrl || "https://api.bazaarlink.ai/v1").replace(/\/+$/, '');
-              endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-            }
-            else if (selectedProvider === 'freellmapi') {
-              const cleanedBase = (baseUrl || "http://localhost:8080/v1").replace(/\/+$/, '');
-              endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-            } else if (selectedProvider === 'ollama') endpoint = (baseUrl || "http://localhost:11434") + "/v1/chat/completions";
             else if (selectedProvider === 'custom') {
               const cleanedBase = (baseUrl || "https://openrouter.ai/api/v1").replace(/\/+$/, '');
               endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-            } else if (baseUrl && !['ollama', 'freellmapi', 'omniroute'].includes(selectedProvider)) {
+            } else if (baseUrl) {
               endpoint = baseUrl + "/chat/completions";
             }
 
@@ -776,18 +779,23 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
               }))
             ];
 
+            const fetchHeaders = {
+              'Content-Type': 'application/json',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              'Accept': 'application/json, text/plain, */*',
+              'Authorization': `Bearer ${keyToUse}`
+            };
+
             const response = await fetch(endpoint, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${keyToUse}`
-              },
+              headers: fetchHeaders,
               body: JSON.stringify({
                 model: selectedModel,
                 messages: formattedMessages,
                 temperature: 0.7,
                 max_tokens: 1024
-              })
+              }),
+              signal: AbortSignal.timeout(30000)
             });
 
             const data = await response.json();
@@ -847,10 +855,10 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
                 const opencodeProcess = spawn(
                   OPENCODE_BIN_PATH,
                   args,
-                  { cwd: rootDir, timeout: 300000, env: { ...process.env, LANG: 'en_US.UTF-8' } }
+                  { cwd: rootDir, timeout: 300000, env: NO_COLOR_ENV }
                 );
                 let stdout = '';
-                opencodeProcess.stdout.on('data', data => stdout += data);
+                opencodeProcess.stdout.on('data', data => { stdout += stripAnsi(data.toString()); });
                 opencodeProcess.on('close', () => {
                   const cleanOut = stdout.replace(/\[Agent Error\]/g, '').trim();
                   if (cleanOut && cleanOut.length > 0) {
@@ -881,24 +889,17 @@ ${memoryText || '- Người dùng thích làm việc chuyên nghiệp, nội dun
 async function resolveProviderAndKey(req, provider, model_name, client_api_key) {
   let selectedProvider = provider || 'gemini';
   let selectedModel = model_name || 'gemini-1.5-flash';
-  let keyToUse = client_api_key;
+  let keyToUse = null;
   let baseUrl = null;
 
-  if (client_api_key && client_api_key.trim()) {
-    if (req.user && req.user.role === 'admin') {
-      const keyId = 'k_' + selectedProvider;
-      db.run(
-        `INSERT INTO khoa_api (ma_khoa, ma_nguoi_dung, ten_nha_cung_cap, gia_tri_khoa) VALUES (?, ?, ?, ?) ON CONFLICT(ma_khoa) DO UPDATE SET gia_tri_khoa = excluded.gia_tri_khoa`,
-        [keyId, req.user.id, selectedProvider, client_api_key.trim()]
-      );
-    }
-  }
-
-  if (!keyToUse) {
-    const dbKeyRow = await new Promise((resDb) => {
-      db.get("SELECT gia_tri_khoa FROM khoa_api WHERE ten_nha_cung_cap = ?", [selectedProvider], (err, r) => resDb(r));
-    });
-    if (dbKeyRow && dbKeyRow.gia_tri_khoa) keyToUse = dbKeyRow.gia_tri_khoa;
+  // Lấy API key từ CSDL khoa_api của Admin trước
+  const dbKeyRow = await new Promise((resDb) => {
+    db.get("SELECT gia_tri_khoa FROM khoa_api WHERE LOWER(ten_nha_cung_cap) = LOWER(?)", [selectedProvider], (err, r) => resDb(r));
+  });
+  if (dbKeyRow && dbKeyRow.gia_tri_khoa && dbKeyRow.gia_tri_khoa.trim()) {
+    keyToUse = dbKeyRow.gia_tri_khoa.trim();
+  } else if (client_api_key && client_api_key.trim()) {
+    keyToUse = client_api_key.trim();
   }
 
   // Fetch base_url from ai_providers table for custom providers
@@ -911,7 +912,7 @@ async function resolveProviderAndKey(req, provider, model_name, client_api_key) 
     keyToUse = process.env.GEMINI_API_KEY;
   }
 
-  if (!keyToUse && !['ollama', 'opencode', 'freellmapi'].includes(selectedProvider)) {
+  if (!keyToUse && !['opencode'].includes(selectedProvider)) {
     if (IS_OPENCODE_AVAILABLE) {
       selectedProvider = 'opencode';
       selectedModel = 'opencode/deepseek-v4-flash-free';
@@ -1063,15 +1064,18 @@ router.post('/conversations/:id/messages/stream', (req, res, next) => {
 
     sendSSE({ type: 'status', message: '🤖 Đang khởi động Agent (opencode)... Vui lòng đợi, agent có thể mất 40s–5 phút tùy tác vụ.' });
 
-    const agentProcess = spawn(OPENCODE_BIN_PATH, ['run', noi_dung, '-m', opencodeModel, '--auto'], { cwd: rootDir, timeout: 300000, env: { ...process.env, LANG: 'en_US.UTF-8' } });
+    const agentProcess = spawn(OPENCODE_BIN_PATH, ['run', noi_dung, '-m', opencodeModel, '--auto'], { cwd: rootDir, timeout: 300000, env: NO_COLOR_ENV });
     let stdout = '';
     let stderr = '';
-    agentProcess.stdout.on('data', (data) => { const chunk = data.toString(); stdout += chunk; sendSSE({ type: 'token', text: chunk }); });
-    agentProcess.stderr.on('data', (data) => { stderr += data.toString(); });
+    const cleaner = new AnsiStreamCleaner();
+    agentProcess.stdout.on('data', (data) => { const cleaned = cleaner.push(data.toString()); if (cleaned) { stdout += cleaned; sendSSE({ type: 'token', text: cleaned }); } });
+    agentProcess.stderr.on('data', (data) => { stderr += stripAnsi(data.toString()); });
     agentProcess.on('error', () => { sendSSE({ type: 'error', message: 'Lỗi khởi động Agent process.' }); endStream(); });
     agentProcess.on('close', (code) => {
+      const flushed = cleaner.flush();
+      if (flushed) stdout += flushed;
       let finalText;
-      if (code !== 0) { finalText = stdout.trim() || stderr || `[Agent Error] Process exited with code ${code}`; }
+      if (code !== 0) { finalText = stdout.trim() || stderr.trim() || `[Agent Error] Process exited with code ${code}`; }
       else { finalText = stdout.trim() || "Tôi đã tự động thực thi các câu lệnh và cập nhật tệp tin thành công cho bạn."; }
       const maTinNhanAI = crypto.randomUUID();
       db.run("INSERT INTO tin_nhan (ma_tin_nhan, ma_hoi_thoai, vai_tro, noi_dung) VALUES (?, ?, 'assistant', ?)", [maTinNhanAI, id, finalText], () => {
@@ -1105,39 +1109,34 @@ router.post('/conversations/:id/messages/stream', (req, res, next) => {
           const t = chunk.text();
           if (t) { fullText += t; sendSSE({ type: 'token', text: t }); }
         }
-      } else if (['openai', 'deepseek', 'groq', 'github', 'freellmapi', 'ollama', 'custom', 'kiraai', 'bazaarlink'].includes(selectedProvider)) {
+      } else if (['openai', 'deepseek', 'groq', 'github', 'custom'].includes(selectedProvider)) {
         let endpoint = "https://api.openai.com/v1/chat/completions";
         if (selectedProvider === 'deepseek') endpoint = "https://api.deepseek.com/chat/completions";
         if (selectedProvider === 'groq') endpoint = "https://api.groq.com/openai/v1/chat/completions";
         if (selectedProvider === 'github') endpoint = "https://models.github.ai/inference/chat/completions";
-        if (selectedProvider === 'kiraai') {
-          const cleanedBase = (baseUrl || "https://kiraai.vn/api/v1").replace(/\/+$/, '');
-          endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-        }
-        if (selectedProvider === 'bazaarlink') {
-          const cleanedBase = (baseUrl || "https://api.bazaarlink.ai/v1").replace(/\/+$/, '');
-          endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-        }
-        if (selectedProvider === 'freellmapi') {
-          const cleanedBase = (baseUrl || "http://localhost:8080/v1").replace(/\/+$/, '');
-          endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-        }
-        if (selectedProvider === 'ollama') endpoint = (baseUrl || "http://localhost:11434") + "/v1/chat/completions";
         if (selectedProvider === 'custom') {
           const cleanedBase = (baseUrl || "https://openrouter.ai/api/v1").replace(/\/+$/, '');
           endpoint = cleanedBase.endsWith('/chat/completions') ? cleanedBase : `${cleanedBase}/chat/completions`;
-        } else if (baseUrl && !['ollama', 'freellmapi'].includes(selectedProvider)) {
+        } else if (baseUrl) {
           endpoint = baseUrl + "/chat/completions";
         }
         const formattedMessages = [{ role: "system", content: systemPrompt }, ...history.map(h => ({ role: h.vai_tro === 'user' ? 'user' : 'assistant', content: h.noi_dung }))];
+        const fetchHeaders = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'text/event-stream, application/json, */*',
+          'Authorization': `Bearer ${keyToUse}`
+        };
         const response = await fetch(endpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${keyToUse}` },
-          body: JSON.stringify({ model: selectedModel, messages: formattedMessages, temperature: 0.7, stream: true })
+          headers: fetchHeaders,
+          body: JSON.stringify({ model: selectedModel, messages: formattedMessages, temperature: 0.7, stream: true }),
+          signal: AbortSignal.timeout(35000)
         });
         if (!response.ok || !response.body) {
           const errData = await response.json().catch(() => ({}));
-          sendSSE({ type: 'error', message: `Lỗi từ ${selectedProvider.toUpperCase()}: ${errData.error?.message || response.status}` });
+          const statusText = response.status === 504 ? '504 Gateway Timeout (Server nhà cung cấp bị nghẽn/quá tải). Vui lòng đổi sang model khác như Gemini/Groq.' : response.status;
+          sendSSE({ type: 'error', message: `Lỗi từ ${selectedProvider.toUpperCase()}: ${errData.error?.message || statusText}` });
           return endStream();
         }
         const reader = response.body.getReader();
@@ -1201,19 +1200,21 @@ router.post('/conversations/:id/messages/stream', (req, res, next) => {
           const opencodeModel = selectedModel && selectedModel !== 'opencode-default' ? selectedModel : 'opencode/deepseek-v4-flash-free';
           const rootDir = path.join(__dirname, '..', '..', '..');
           await new Promise((resolve) => {
-            const proc = spawn(OPENCODE_BIN_PATH, ['run', noi_dung, '-m', opencodeModel], { cwd: rootDir, timeout: 300000, env: { ...process.env, LANG: 'en_US.UTF-8' } });
+            const proc = spawn(OPENCODE_BIN_PATH, ['run', noi_dung, '-m', opencodeModel], { cwd: rootDir, timeout: 300000, env: NO_COLOR_ENV });
             let out = '';
-            proc.stdout.on('data', (d) => { const t = d.toString(); out += t; sendSSE({ type: 'token', text: t }); });
+            const cleaner = new AnsiStreamCleaner();
+            proc.stdout.on('data', (d) => { const t = cleaner.push(d.toString()); if (t) { out += t; sendSSE({ type: 'token', text: t }); } });
             proc.on('error', () => { fullText = 'Lỗi khởi động opencode.'; resolve(); });
-            proc.on('close', () => { fullText = out.replace(/\[Agent Error\]/g, '').trim() || `[OpenCode] Đã thực thi xong. Xem kết quả ở phía trên.`; resolve(); });
+            proc.on('close', () => { const f = cleaner.flush(); if (f) out += f; fullText = out.replace(/\[Agent Error\]/g, '').trim() || `[OpenCode] Đã thực thi xong. Xem kết quả ở phía trên.`; resolve(); });
             req.on('close', () => { try { if (!proc.killed) proc.kill(); } catch (e) {} });
           });
         }
       }
       if (!fullText) fullText = '[Không có phản hồi từ AI]';
+      const cleanFullText = cleanAIThinkingProcess(fullText);
       const maTinNhanAI = crypto.randomUUID();
-      db.run("INSERT INTO tin_nhan (ma_tin_nhan, ma_hoi_thoai, vai_tro, noi_dung) VALUES (?, ?, 'assistant', ?)", [maTinNhanAI, id, fullText], () => {
-        sendSSE({ type: 'done', ma_tin_nhan: maTinNhanAI, noi_dung: fullText });
+      db.run("INSERT INTO tin_nhan (ma_tin_nhan, ma_hoi_thoai, vai_tro, noi_dung) VALUES (?, ?, 'assistant', ?)", [maTinNhanAI, id, cleanFullText], () => {
+        sendSSE({ type: 'done', ma_tin_nhan: maTinNhanAI, noi_dung: cleanFullText });
         endStream();
       });
     } catch (apiErr) {

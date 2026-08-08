@@ -14,8 +14,8 @@ export default function SkillsModal({ skillsOpen, setSkillsOpen, dbSkills }) {
         </div>
         <div className="grid grid-cols-2 gap-2">
           {dbSkills === null && <p className="text-xs text-red-400 col-span-2 text-center py-8">Không thể tải skills</p>}
-          {dbSkills && dbSkills.length === 0 && <p className="text-xs text-slate-500 col-span-2 text-center py-8">Không có skills nào</p>}
-          {dbSkills.map(s => (
+          {(!dbSkills || dbSkills.length === 0) && <p className="text-xs text-slate-500 col-span-2 text-center py-8">Không có skills nào</p>}
+          {(dbSkills || []).map(s => (
             <div key={s.ma_ky_nang} className="p-3 bg-[#0d0e11] rounded-xl border border-white/5 hover:border-purple-500/30 transition-all">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">{s.ten_ky_nang}</span>

@@ -1,11 +1,13 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const db = require('../config/db');
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? (() => { throw new Error('JWT_SECRET phải được cấu hình trong production!') })() : 'dev-only-secret-' + crypto.randomBytes(16).toString('hex'));
 
 // Middleware kiểm tra đã đăng nhập chưa
 function authMiddleware(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.error('[authMiddleware] Missing or invalid Authorization header:', authHeader);
         return res.status(401).json({ 
             error: 'Yêu cầu đăng nhập.',
             code: 'LOGIN_REQUIRED'
@@ -15,9 +17,26 @@ function authMiddleware(req, res, next) {
     const token = authHeader.split(' ')[1];
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        req.user = decoded; // Gắn thông tin user (id, role) vào request
-        next();
+        // FIX SECURITY: user bị khoá (banned) KHÔNG được dùng token tiếp (kể cả token cũ)
+        db.get("SELECT phan_quyen, trang_thai FROM nguoi_dung WHERE ma_nguoi_dung = ?", [decoded.id], (err, row) => {
+          if (err) {
+            console.error('[authMiddleware] DB Error:', err.message);
+            return res.status(500).json({ error: 'Lỗi CSDL' });
+          }
+          if (row && row.trang_thai === 'banned') {
+            console.error('[authMiddleware] Banned user attempted access:', decoded.id);
+            return res.status(403).json({ error: 'Tài khoản của bạn đã bị khoá.', code: 'ACCOUNT_BANNED' });
+          }
+          // Gắn thêm role từ DB phòng trường hợp token cũ chưa update role mới
+          if (row) {
+            decoded.role = row.phan_quyen;
+            decoded.phan_quyen = row.phan_quyen;
+          }
+          req.user = decoded; // Gắn thông tin user (id, role) vào request
+          next();
+        });
     } catch (ex) {
+        console.error('[authMiddleware] Token verify fail:', ex.message);
         res.status(401).json({ 
             error: 'Token không hợp lệ hoặc đã hết hạn.',
             code: 'INVALID_TOKEN'
@@ -30,6 +49,7 @@ function adminMiddleware(req, res, next) {
     if (req.user && (req.user.role === 'admin' || req.user.phan_quyen === 'admin')) {
         next();
     } else {
+        console.error('[adminMiddleware] Access denied for user:', req.user);
         res.status(403).json({ error: 'Bạn không có quyền thực hiện hành động này.' });
     }
 }

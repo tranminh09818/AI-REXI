@@ -39,7 +39,15 @@ export async function apiFetch(path, token, options = {}) {
   });
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    // Token hết hạn / không hợp lệ → báo app mở lại màn hình đăng nhập (thay vì chết lặng)
+    if (res.status === 401 && token && (data.code === 'INVALID_TOKEN' || data.code === 'LOGIN_REQUIRED')) {
+      try {
+        window.dispatchEvent(new CustomEvent('rexi_session_expired', { detail: data.error }));
+      } catch (e) {}
+    }
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
   return data;
 }
 
