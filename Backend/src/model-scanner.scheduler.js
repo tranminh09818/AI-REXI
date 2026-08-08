@@ -373,6 +373,19 @@ async function scanAllProviders() {
   return summary;
 }
 
+// Dọn "model ma": model của provider không còn key thì không thể hoạt động → xóa sạch
+function cleanupStaleModels(providerId) {
+  try {
+    const d = getDB();
+    if (!d) return;
+    const del1 = d.prepare('DELETE FROM ai_models WHERE ma_nha_cung_cap = ?').run(providerId);
+    const del2 = d.prepare('DELETE FROM model_scan_cache WHERE ma_nha_cung_cap = ?').run(providerId);
+    if (del1.changes > 0 || del2.changes > 0) {
+      console.log(`[ModelScanner] Đã dọn ${del1.changes} model ma của provider '${providerId}' (không còn key)`);
+    }
+  } catch(e) { /* ignore */ }
+}
+
 // Quét khi server khởi động — chỉ scan provider có key, bỏ qua provider không có key
 async function scanOnStartup() {
   console.log('[ModelScanner] Startup scan: checking providers with keys...');
@@ -380,7 +393,10 @@ async function scanOnStartup() {
   for (const providerId of Object.keys(PROVIDER_ENDPOINTS)) {
     const apiKey = getKeyForProvider(providerId);
     // Bỏ qua provider KHÔNG có key, TRỪ các provider không cần key (local CLI / free)
-    if (!apiKey && !['opencode'].includes(providerId)) continue;
+    if (!apiKey && !['opencode'].includes(providerId)) {
+      cleanupStaleModels(providerId); // provider không có key → dọn model ma cũ của họ
+      continue;
+    }
     try {
       const result = await scanProvider(providerId);
       summary.push({ providerId, ...result });

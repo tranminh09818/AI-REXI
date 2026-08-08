@@ -26,6 +26,12 @@ router.get('/', (req, res) => {
     FROM ai_models m
     LEFT JOIN ai_providers p ON LOWER(m.ma_nha_cung_cap) = LOWER(p.ma_nha_cung_cap)
     WHERE m.kich_hoat = 1
+      -- CHỈ hiển thị model của provider CÓ key trong khoa_api (hoặc provider keyless như opencode)
+      -- tránh hiện "model ma" của provider đã bị xóa key
+      AND (
+        EXISTS (SELECT 1 FROM khoa_api k WHERE LOWER(k.ten_nha_cung_cap) = LOWER(m.ma_nha_cung_cap))
+        OR EXISTS (SELECT 1 FROM ai_providers p2 WHERE LOWER(p2.ma_nha_cung_cap) = LOWER(m.ma_nha_cung_cap) AND p2.can_api_key = 0 AND p2.kich_hoat = 1)
+      )
   `;
   const params = [];
   if (provider) {
@@ -39,9 +45,13 @@ router.get('/', (req, res) => {
 
     // Nếu CSDL ai_models rỗng → Fallback sang model_scan_cache hoặc danh sách mặc định uy tín
     if (!rows || rows.length === 0) {
+      const keyOrKeyless = `(
+        EXISTS (SELECT 1 FROM khoa_api k WHERE LOWER(k.ten_nha_cung_cap) = LOWER(c.ma_nha_cung_cap))
+        OR EXISTS (SELECT 1 FROM ai_providers p2 WHERE LOWER(p2.ma_nha_cung_cap) = LOWER(c.ma_nha_cung_cap) AND p2.can_api_key = 0 AND p2.kich_hoat = 1)
+      )`;
       const cacheSql = provider
-        ? `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache WHERE trang_thai = 'working' AND LOWER(ma_nha_cung_cap) = LOWER(?)`
-        : `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache WHERE trang_thai = 'working'`;
+        ? `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache c WHERE trang_thai = 'working' AND LOWER(c.ma_nha_cung_cap) = LOWER(?) AND ${keyOrKeyless}`
+        : `SELECT ma_model, ma_nha_cung_cap FROM model_scan_cache c WHERE trang_thai = 'working' AND ${keyOrKeyless}`;
       const cacheParams = provider ? [provider] : [];
 
       return db.all(cacheSql, cacheParams, (err2, cacheRows) => {
