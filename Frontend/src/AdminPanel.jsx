@@ -586,10 +586,17 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
     try {
       const data = await apiFetch('/models/admin/models/scan-all', token, { method: 'POST' });
       await fetchScanCache();
+      const keptProviders = (data.summary || []).filter(s => s.keptOld);
+      const keptNames = keptProviders.map(s => s.providerId);
+      const keptLabel = keptNames.slice(0, 3).join(', ') + (keptNames.length > 3 ? ` +${keptNames.length - 3} khác` : '');
       if (data.message) {
-        showToast(data.message);
+        showToast(keptProviders.length > 0
+          ? `${data.message} ⚠️ ${keptLabel}: 0 working — giữ model cũ`
+          : data.message);
       } else {
-        showToast('✅ Quét hoàn tất!');
+        showToast(keptProviders.length > 0
+          ? `⚠️ Quét xong — ${keptLabel} giữ model cũ (0 working)`
+          : '✅ Quét hoàn tất!');
       }
     } catch(e) { showToast('Lỗi quét: ' + e.message, 'error'); }
     finally { setScanningAll(false); }
@@ -609,7 +616,11 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
       });
       console.log('[AdminPanel] Scan response:', data);
       if (data.success) {
-        showToast(`✅ ${provName}: ${data.working}/${data.total} model hoạt động`);
+        if (data.keptOld) {
+          showToast(`⚠️ ${provName}: 0/${data.total} model hoạt động — GIỮ NGUYÊN model cũ. Lý do: ${data.keptOldReason || 'lỗi tạm thời'}`, 'error');
+        } else {
+          showToast(`✅ ${provName}: ${data.working}/${data.total} model hoạt động`);
+        }
         await fetchScanCache();
         window.dispatchEvent(new CustomEvent('rexi_models_published', { detail: { provider: providerId } }));
       } else if (data.skipped) {
@@ -640,29 +651,61 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2"><Key size={20} className="text-amber-400" /> API Keys & Model Scanner</h2>
-        <div className="flex items-center gap-2">
-          {lastFullScan && <span className="text-[10px] text-slate-500">🕐 Quét lần cuối: {formatTime(lastFullScan)}</span>}
-          <span className="text-[10px] text-slate-400 bg-white/5 px-2 py-1 rounded-lg flex items-center gap-1">
-            <Clock size={11} className="text-cyan-400" />
-            Tự động quét
-            <input
-              type="time"
-              aria-label="Thời gian tự động quét model"
-              value={newScanTime}
-              onChange={e => setNewScanTime(e.target.value || '03:00')}
-              title="Chọn giờ quét (HH:MM)"
-              className="w-[72px] bg-[#131417] border border-cyan-500/30 rounded-md px-1 py-0.5 text-center text-slate-200 focus:outline-none focus:border-cyan-500 [color-scheme:dark]"
-            />
-            hàng ngày
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-bold text-white flex items-center gap-2">
+            <span className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+              <Key size={16} className="text-amber-400" />
+            </span>
+            API Keys & Model Scanner
+          </h2>
+          {lastFullScan && (
+            <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Quét lần cuối: {formatTime(lastFullScan)}
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 bg-[#13141a]/80 border border-white/8 rounded-xl px-3 py-1.5">
+            <span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
+              <Clock size={12} className="text-cyan-400" />
+              Tự động quét
+            </span>
+            {/* Custom time picker thay input type=time */}
+            <div className="flex items-center gap-1 bg-[#0d0e14] border border-white/10 rounded-lg px-1.5 py-0.5">
+              <select
+                aria-label="Giờ quét"
+                value={newScanTime.split(':')[0]}
+                onChange={e => { const mm = (newScanTime.split(':')[1]||'00'); setNewScanTime(`${e.target.value}:${mm}`); }}
+                className="bg-transparent text-xs text-cyan-300 font-mono font-semibold outline-none cursor-pointer appearance-none text-center pr-1"
+              >
+                {Array.from({length:24},(_,i)=>String(i).padStart(2,'0')).map(h=>(
+                  <option key={h} value={h} className="bg-[#0d0e14] text-slate-200">{h}</option>
+                ))}
+              </select>
+              <span className="text-cyan-500 font-bold text-xs">:</span>
+              <select
+                aria-label="Phút quét"
+                value={newScanTime.split(':')[1]||'00'}
+                onChange={e => { const hh = (newScanTime.split(':')[0]||'03'); setNewScanTime(`${hh}:${e.target.value}`); }}
+                className="bg-transparent text-xs text-cyan-300 font-mono font-semibold outline-none cursor-pointer appearance-none text-center pl-0.5"
+              >
+                {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m=>(
+                  <option key={m} value={m} className="bg-[#0d0e14] text-slate-200">{m}</option>
+                ))}
+              </select>
+            </div>
+            <span className="text-[11px] text-slate-400">hàng ngày</span>
             <button
               type="button"
               onClick={saveScanSchedule}
               disabled={savingScanTime || scanTime === newScanTime}
-              className="px-2 py-0.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded-md font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
-            >{savingScanTime ? '...' : 'Lưu'}</button>
-          </span>
+              className="px-2 py-0.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >{savingScanTime ? <RefreshCw size={10} className="animate-spin" /> : 'Lưu'}</button>
+          </div>
+
           <button
             onClick={async () => {
               if (window.confirm("Bạn có chắc muốn xóa sạch lịch sử cache và tắt các model cũ trong CSDL?")) {
@@ -674,17 +717,18 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
                 } catch(e) { showToast(e.message, 'error'); }
               }
             }}
-            className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl text-xs font-semibold flex items-center gap-1"
+            className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors border border-rose-500/20 hover:border-rose-500/40"
           >
-            🧹 Xóa Hết Models Cũ
+            <Trash2 size={12} />
+            Xóa Hết Models Cũ
           </button>
           <button
             type="button"
             onClick={() => !scanningAll && scanAll()}
-            className={`px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 ${scanningAll ? 'opacity-50' : ''}`}
+            className={`px-3.5 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-lg shadow-cyan-500/10 transition-all ${scanningAll ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {scanningAll ? <RefreshCw size={12} className="animate-spin" /> : <Radar size={12} />}
-            {scanningAll ? 'Đang quét...' : '🔄 Quét Tất Cả'}
+            {scanningAll ? 'Đang quét...' : 'Quét Tất Cả'}
           </button>
         </div>
       </div>

@@ -225,7 +225,7 @@ function saveScanResult(providerId, modelId, status, latencyMs, errorMsg) {
 }
 
 // Lưu log thời gian quét gần nhất của provider
-function saveProviderScanTime(providerId) {
+function saveProviderScanTime(providerId, total = 0, working = 0) {
   const d = getDB();
   if (!d) return;
   try {
@@ -236,11 +236,32 @@ function saveProviderScanTime(providerId) {
       model_hoat_dong INTEGER DEFAULT 0
     )`);
     d.prepare(`
-      INSERT INTO provider_scan_log (ma_nha_cung_cap, lan_quet_cuoi)
-      VALUES (?, datetime('now'))
-      ON CONFLICT(ma_nha_cung_cap) DO UPDATE SET lan_quet_cuoi = datetime('now')
-    `).run(providerId);
+      INSERT INTO provider_scan_log (ma_nha_cung_cap, lan_quet_cuoi, tong_model, model_hoat_dong)
+      VALUES (?, datetime('now'), ?, ?)
+      ON CONFLICT(ma_nha_cung_cap) DO UPDATE SET
+        lan_quet_cuoi = datetime('now'),
+        tong_model = excluded.tong_model,
+        model_hoat_dong = excluded.model_hoat_dong
+    `).run(providerId, total, working);
   } catch(e) {}
+}
+
+// Phân loại lý do khi lượt quét ra 0 model working — để Admin hiển thị rõ cho người dùng
+function classifyZeroWorkingReason(results) {
+  if (!results || results.length === 0) return 'Không có model nào để kiểm tra';
+  const errs = results.map(r => String(r.error || '').toLowerCase());
+  const allFailed = results.every(r => r.status === 'failed');
+  if (allFailed) {
+    // Chịu đựng lỗi hỗn hợp: nếu ≥1 nửa số lỗi là rate-limit → kết luận rate-limit
+    const rateLimitedCount = errs.filter(e => e.includes('429') || e.includes('rate limit') || e.includes('quota')).length;
+    if (rateLimitedCount >= Math.ceil(errs.length / 2)) {
+      return 'Rate limit (429) — hết quota free, chờ reset hoặc nạp credits';
+    }
+    if (errs.some(e => e.includes('401') || e.includes('403') || e.includes('unauthorized') || e.includes('invalid') || e.includes('forbidden'))) {
+      return 'API key bị từ chối (401/403) — kiểm tra lại key';
+    }
+  }
+  return 'Không model nào trả lời được (provider đang lỗi / hết hạn)';
 }
 
 // Quét toàn bộ một provider
@@ -316,18 +337,21 @@ async function scanProvider(providerId) {
     }
   }
 
-  // Only save scan time if we actually tested models
-  if (results.length > 0) {
-    saveProviderScanTime(providerId);
-  }
-
   const workingList = results.filter(r => r.status === 'working');
   const working = workingList.length;
+
+  // Only save scan time if we actually tested models (lưu kèm tổng + số working vào provider_scan_log)
+  if (results.length > 0) {
+    saveProviderScanTime(providerId, results.length, working);
+  }
+
   console.log(`[ModelScanner] ${cfg.name}: ${working}/${results.length} working`);
 
-  // 🔄 REPLACE POLICY (an toàn): Chỉ khi lượt quét mới có ≥1 model working thì mới thay thế toàn bộ model cũ
-  // của provider bằng đúng danh sách working mới (transaction để delete+insert nguyên tử).
-  // Nếu 0 working (key lỗi / lỗi mạng tạm thời) → GIỮ NGUYÊN model cũ đang hoạt động, tránh mất trắng provider.
+  // 🔄 RESET THÔNG MINH (Smart Reset): mỗi lượt quét = 1 lần reset của chính provider đó.
+  // ≥1 model working → XÓA HẾT model cũ + insert đúng danh sách working mới (transaction delete+insert nguyên tử).
+  // 0 working (mạng lỗi / rate-limit / key lỗi tạm thời) → GIỮ model cũ + báo rõ lý do, tránh mất trắng provider.
+  let keptOld = false;
+  let keptOldReason = '';
   if (working > 0) {
     try {
       const d = getDB();
@@ -352,10 +376,12 @@ async function scanProvider(providerId) {
       console.error(`[ModelScanner] ${cfg.name} replace models error:`, repErr.message);
     }
   } else {
-    console.warn(`[ModelScanner] ${cfg.name}: 0 model working trong lượt quét này — giữ nguyên model cũ đang hoạt động`);
+    keptOld = true;
+    keptOldReason = classifyZeroWorkingReason(results);
+    console.warn(`[ModelScanner] ${cfg.name}: 0 model working — giữ nguyên model cũ. Lý do: ${keptOldReason}`);
   }
 
-  return { success: true, provider: providerId, total: results.length, working, results };
+  return { success: true, provider: providerId, total: results.length, working, results, keptOld, keptOldReason };
 }
 
 // Quét tất cả providers tuần tự
