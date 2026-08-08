@@ -19,10 +19,10 @@ if (!ADMIN_SEED) {
   try {
     ADMIN_SEED = require('D:/AI REXI/Database/admin-seed.js');
   } catch (e) {
-    // Fallback cuối: môi trường mới (máy khác / Render) không có file D:\ — vẫn đảm bảo
-    // tồn tại 1 tài khoản admin để đăng nhập lần đầu, sau đó nên set ADMIN_EMAIL/ADMIN_PASSWORD.
-    ADMIN_SEED = { email: 'admin@rexi.com', mat_khau_ma_hoa_hash: null, ten_day_du: 'Administrator' };
-    console.warn('[ADMIN-SEED] ⚠️ Không có ADMIN_EMAIL/ADMIN_PASSWORD env và không có admin-seed.js — dùng fallback admin@rexi.com (mật khẩu ngẫu nhiên in bên dưới). Nên set ADMIN_EMAIL + ADMIN_PASSWORD trên Render để cấu hình cố định.');
+    // Fallback cuối: môi trường mới (máy khác / Render) không có file D:\ — tự tạo admin mặc định
+    // admin@rexi.com / admin123 để đăng nhập được NGAY. Set ADMIN_EMAIL + ADMIN_PASSWORD để override.
+    ADMIN_SEED = { email: 'admin@rexi.com', mat_khau_ma_hoa_hash: bcrypt.hashSync('admin123', 10), ten_day_du: 'Administrator' };
+    console.warn('[ADMIN-SEED] ⚠️ Không có ADMIN_EMAIL/ADMIN_PASSWORD env và không có admin-seed.js — dùng mặc định admin@rexi.com / admin123. NÊN ĐỔI MẬT KHẨU trong trang Admin sau khi đăng nhập!');
   }
 }
 

@@ -4,11 +4,11 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../config/db');
-const { authMiddleware, adminMiddleware, JWT_SECRET } = require('../middleware/auth.middleware');
+const { authMiddleware, adminMiddleware, getJWTSecret } = require('../middleware/auth.middleware');
 
 function generateToken(user) {
     const payload = { id: user.ma_nguoi_dung, role: user.phan_quyen };
-    return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+    return jwt.sign(payload, getJWTSecret(), { expiresIn: '7d' });
 }
 
 function sanitizeUser(user) {

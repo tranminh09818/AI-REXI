@@ -7,7 +7,7 @@ import {
   Activity, Trash2, Search, RefreshCw, ChevronLeft, ChevronRight,
   Crown, User as UserIcon, Lock, CheckCircle, XCircle,
   AlertTriangle, Database, Send,
-  GitBranch, Terminal, X, Clock, Tv, Globe, Radar, PlayCircle,
+  GitBranch, Terminal, X, Clock, Tv, Globe, Radar, PlayCircle, CalendarClock,
   Plus, Pencil, Download, Loader2, Save, Bell, Code
 } from 'lucide-react';
 import { API_BASE, apiFetch } from './config';
@@ -506,9 +506,10 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
   const [scanCache, setScanCache] = useState({}); // { provider: { working: [], failed: [] } }
   const [providerScanLog, setProviderScanLog] = useState({}); // { provider: lastScanTime }
   const [lastFullScan, setLastFullScan] = useState(null);
-  const [scanTime, setScanTime] = useState('03:00'); // thời gian tự động quét (mặc định 3:00 AM)
-  const [newScanTime, setNewScanTime] = useState('03:00');
-  const [savingScanTime, setSavingScanTime] = useState(false);
+  const [weeklySchedule, setWeeklySchedule] = useState({ day: 1, time: '00:00', label: 'CN → T2 00:00' });
+  const [editingSchedule, setEditingSchedule] = useState(false);
+  const [editDay, setEditDay] = useState(1);
+  const [editTime, setEditTime] = useState('00:00');
 
   const fetchKeys = async () => {
     setLoading(true);
@@ -535,24 +536,43 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
     } catch { /* no scan data yet */ }
   };
 
-  const fetchScanSchedule = async () => {
+  const fetchWeeklySchedule = async () => {
     try {
-      const data = await apiFetch('/models/admin/models/scan-schedule', token);
-      if (data.success) { setScanTime(data.time || '03:00'); setNewScanTime(data.time || '03:00'); }
-    } catch { /* mặc định 3:00 AM */ }
+      const data = await apiFetch('/models/admin/models/weekly-schedule', token);
+      if (data.success) {
+        setWeeklySchedule({ day: data.day, time: data.time, label: data.label });
+        setEditDay(data.day);
+        setEditTime(data.time);
+      }
+    } catch { /* mặc định CN→T2 00:00 */ }
   };
 
-  const saveScanSchedule = async () => {
-    setSavingScanTime(true);
+  const saveWeeklySchedule = async () => {
     try {
-      const res = await apiFetch('/models/admin/models/scan-schedule', token, { method: 'POST', body: JSON.stringify({ time: newScanTime }) });
-      if (res.success) { setScanTime(res.time || newScanTime); showToast(res.message || 'Đã lưu thời gian quét ✅'); }
-      else showToast(res.message || 'Lỗi lưu thời gian quét', 'error');
+      const res = await apiFetch('/models/admin/models/weekly-schedule', token, {
+        method: 'POST', body: JSON.stringify({ day: editDay, time: editTime })
+      });
+      if (res.success) {
+        setWeeklySchedule({ day: editDay, time: editTime, label: res.label });
+        setEditingSchedule(false);
+        showToast(res.message || 'Đã lưu lịch quét ✅');
+      } else showToast(res.message || 'Lỗi lưu', 'error');
     } catch (e) { showToast(e.message, 'error'); }
-    finally { setSavingScanTime(false); }
   };
 
-  useEffect(() => { fetchKeys(); fetchScanCache(); fetchScanSchedule(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const resetWeeklySchedule = async () => {
+    try {
+      const res = await apiFetch('/models/admin/models/weekly-schedule/reset', token, { method: 'POST' });
+      if (res.success) {
+        setWeeklySchedule({ day: 1, time: '00:00', label: 'CN → T2 00:00' });
+        setEditDay(1); setEditTime('00:00');
+        setEditingSchedule(false);
+        showToast(res.message || 'Đã reset lịch quét ✅');
+      }
+    } catch (e) { showToast(e.message, 'error'); }
+  };
+
+  useEffect(() => { fetchKeys(); fetchScanCache(); fetchWeeklySchedule(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveKey = async () => {
     if (!newKey.trim()) return;
@@ -668,47 +688,45 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 bg-[#13141a]/80 border border-white/8 rounded-xl px-3 py-1.5">
-            <span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
-              <Clock size={12} className="text-cyan-400" />
-              Tự động quét
-            </span>
-            {/* Custom time picker thay input type=time */}
-            <div className="flex items-center gap-1 bg-[#0d0e14] border border-white/10 rounded-lg px-1.5 py-0.5">
-              <select
-                aria-label="Giờ quét"
-                value={newScanTime.split(':')[0]}
-                onChange={e => { const mm = (newScanTime.split(':')[1]||'00'); setNewScanTime(`${e.target.value}:${mm}`); }}
-                className="bg-transparent text-xs text-cyan-300 font-mono font-semibold outline-none cursor-pointer appearance-none text-center pr-1"
-              >
-                {Array.from({length:24},(_,i)=>String(i).padStart(2,'0')).map(h=>(
-                  <option key={h} value={h} className="bg-[#0d0e14] text-slate-200">{h}</option>
-                ))}
-              </select>
-              <span className="text-cyan-500 font-bold text-xs">:</span>
-              <select
-                aria-label="Phút quét"
-                value={newScanTime.split(':')[1]||'00'}
-                onChange={e => { const hh = (newScanTime.split(':')[0]||'03'); setNewScanTime(`${hh}:${e.target.value}`); }}
-                className="bg-transparent text-xs text-cyan-300 font-mono font-semibold outline-none cursor-pointer appearance-none text-center pl-0.5"
-              >
-                {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m=>(
-                  <option key={m} value={m} className="bg-[#0d0e14] text-slate-200">{m}</option>
-                ))}
-              </select>
-            </div>
-            <span className="text-[11px] text-slate-400">hàng ngày</span>
-            <button
-              type="button"
-              onClick={saveScanSchedule}
-              disabled={savingScanTime || scanTime === newScanTime}
-              className="px-2 py-0.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >{savingScanTime ? <RefreshCw size={10} className="animate-spin" /> : 'Lưu'}</button>
+          {/* Weekly Schedule — editable */}
+          <div className="flex items-center gap-1.5 bg-[#13141a]/80 border border-violet-500/20 rounded-xl px-3 py-1.5">
+            <CalendarClock size={12} className="text-violet-400" />
+            <span className="text-[11px] font-medium text-violet-300">Tự động quét</span>
+            {editingSchedule ? (
+              <>
+                <select value={editDay} onChange={e => setEditDay(Number(e.target.value))}
+                  className="bg-[#0d0e14] border border-violet-500/30 rounded-md px-1.5 py-0.5 text-[11px] text-violet-200 font-semibold outline-none cursor-pointer">
+                  <option value={0}>CN</option><option value={1}>T2</option><option value={2}>T3</option>
+                  <option value={3}>T4</option><option value={4}>T5</option><option value={5}>T6</option><option value={6}>T7</option>
+                </select>
+                <select value={editTime} onChange={e => setEditTime(e.target.value)}
+                  className="bg-[#0d0e14] border border-violet-500/30 rounded-md px-1.5 py-0.5 text-[11px] text-violet-200 font-mono font-semibold outline-none cursor-pointer">
+                  {['00:00','01:00','02:00','03:00','04:00','05:00','06:00','07:00','08:00','09:00','10:00','11:00',
+                    '12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00','21:00','22:00','23:00',
+                    '00:30','03:30','12:30','18:30'].map(t => (
+                    <option key={t} value={t} className="bg-[#0d0e14]">{t}</option>
+                  ))}
+                </select>
+                <button onClick={saveWeeklySchedule}
+                  className="px-2 py-0.5 bg-violet-500/25 hover:bg-violet-500/40 text-violet-200 rounded-md text-[10px] font-bold transition-colors">Lưu</button>
+                <button onClick={() => { setEditingSchedule(false); setEditDay(weeklySchedule.day); setEditTime(weeklySchedule.time); }}
+                  className="px-1.5 py-0.5 text-slate-500 hover:text-slate-300 text-[10px] transition-colors">Hủy</button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setEditingSchedule(true)}
+                  className="px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-200 text-[10px] font-bold border border-violet-500/20 hover:bg-violet-500/25 transition-colors cursor-pointer">
+                  {weeklySchedule.label}
+                </button>
+                <button onClick={resetWeeklySchedule}
+                  className="text-[9px] text-slate-500 hover:text-violet-300 transition-colors" title="Reset về mặc định">↺</button>
+              </>
+            )}
           </div>
 
           <button
             onClick={async () => {
-              if (window.confirm("Bạn có chắc muốn xóa sạch lịch sử cache và tắt các model cũ trong CSDL?")) {
+              if (window.confirm("Reset cache models? (Tự động hàng tuần CN→T2 00:00, nút này dùng khi cần ngay)")) {
                 try {
                   const res = await apiFetch('/models/admin/models/clear-and-reset', token, { method: 'POST' });
                   showToast(res.message || "Đã reset!");
@@ -718,9 +736,10 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
               }
             }}
             className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors border border-rose-500/20 hover:border-rose-500/40"
+            title="Reset ngay — cache tự động reset hàng tuần CN→T2 00:00"
           >
             <Trash2 size={12} />
-            Xóa Hết Models Cũ
+            Reset Cache
           </button>
           <button
             type="button"

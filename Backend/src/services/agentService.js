@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
 const { stripAnsi } = require('../utils/stripAnsi');
+const { generateEdgeTTSNode } = require('./edgeTTS');
 
 // ========== TOOL REGISTRY ==========
 // Thêm tool mới chỉ cần thêm 1 object vào đây, AI tự hiểu và dùng!
@@ -150,6 +151,8 @@ async function executeTool(toolName, args) {
       }
     }
     case 'text_to_speech': {
+      // FIX PROD: dùng Edge TTS Thuần Node.js (WebSocket tới Microsoft) — KHÔNG cần Python,
+      // chạy được cả trên Render (trước đây dùng python3 trên Linux → lỗi trên server).
       const VALID_TTS_VOICES = [
         'vi-VN-HoaiMyNeural', 'vi-VN-NamMinhNeural', 'vi-VN-DuyAnhNeural',
         'vi-VN-HaSanhNeural', 'vi-VN-MinhAnhNeural', 'vi-VN-ThuyMinhNeural',
@@ -158,24 +161,18 @@ async function executeTool(toolName, args) {
       ];
       const voiceName = VALID_TTS_VOICES.includes(args.voice) ? args.voice : 'vi-VN-HoaiMyNeural';
       const validRate = args.rate && /^[+-]\d+%$/.test(args.rate) ? args.rate : '+0%';
-      const validPitch = args.pitch && /^[+-]\d+%$/.test(args.pitch) ? args.pitch : '+0%';
+      const validPitch = args.pitch && /^[+-]\d+Hz$/.test(args.pitch) ? args.pitch : '+0Hz';
       const cleanedText = (args.text || '').replace(/"/g, '\\"').substring(0, 1000);
       if (!cleanedText.trim()) return { error: 'Văn bản trống' };
-      const outFile = path.join(__dirname, '..', '..', 'temp', 'tts_' + Date.now() + '.mp3');
-      const os = require('os');
-      const isWin = os.platform() === 'win32';
-      return new Promise(r => {
-        const spawn = require('child_process').spawn;
-        const cmd = isWin ? 'powershell' : 'python3';
-        const baseArgs = isWin
-          ? ['-Command', `python -m edge_tts --voice "${voiceName}" --text "${cleanedText}" --rate "${validRate}" --pitch "${validPitch}" --write-media "${outFile}"`]
-          : ['-m', 'edge_tts', '--voice', voiceName, '--text', cleanedText, '--rate', validRate, '--pitch', validPitch, '--write-media', outFile];
-        const proc = spawn(cmd, baseArgs, { timeout: 30000 });
-        let stderr = '';
-        proc.stderr.on('data', d => { stderr += d.toString(); });
-        proc.on('close', code => r(code === 0 ? { success: true, audioFile: outFile, voice: voiceName } : { error: `TTS failed (code ${code}): ${stderr}` }));
-        proc.on('error', err => r({ error: err.message }));
-      });
+      try {
+        const outFile = path.join(__dirname, '..', '..', 'temp', 'tts_' + Date.now() + '.mp3');
+        const audioBuffer = await generateEdgeTTSNode(voiceName, cleanedText, validRate, validPitch);
+        if (!audioBuffer || audioBuffer.length === 0) return { error: 'TTS không tạo được âm thanh' };
+        fs.writeFileSync(outFile, audioBuffer);
+        return { success: true, audioFile: outFile, voice: voiceName };
+      } catch (err) {
+        return { error: 'TTS lỗi: ' + (err.message || err) };
+      }
     }
     default:
       return { error: "Tool '" + toolName + "' chưa được implement" };

@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { JWT_SECRET } = require('./auth.middleware');
+const { getJWTSecret } = require('./auth.middleware');
 
 const requestCounts = new Map();
 const WINDOW_MS = 60 * 1000; // 1 minute window
@@ -19,7 +19,7 @@ function rateLimitMiddleware(req, res, next) {
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
     try {
-      const decoded = jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, getJWTSecret());
       if (decoded && decoded.role === 'admin') {
         return next(); // Bỏ qua rate limit hoàn toàn cho Admin
       }

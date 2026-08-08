@@ -9,6 +9,7 @@ const { Shell } = require('node-powershell');
 const { isPrivateHostname } = require('../utils/urlSafety');
 const multer = require('multer');
 const Groq = require('groq-sdk');
+const { generateEdgeTTSNode } = require('../services/edgeTTS');
 
 // Multer: Lưu file audio tạm thời vào thư mục temp
 const upload = multer({
@@ -291,94 +292,9 @@ router.get('/tts/status', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Engine Edge TTS Thuần Node.js (WebSocket trực tiếp tới Microsoft Edge TTS)
-// Không cần cài Python/pip, hoạt động 100% tức thì trong 300ms
+// Engine Edge TTS Thuần Node.js — dùng chung từ src/services/edgeTTS.js
+// (WebSocket trực tiếp tới Microsoft Edge TTS, không cần Python)
 // ═══════════════════════════════════════════════════════════════════
-const WebSocket = require('ws');
-const crypto = require('crypto');
-
-function generateEdgeTTSNode(voiceName, text, rate = '+0%', pitch = '+0Hz') {
-  return new Promise((resolve, reject) => {
-    const requestId = crypto.randomUUID().replace(/-/g, '');
-    const wsUrl = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?trustedclienttoken=6A5AA1D4EA5E40A9BCE92FC334C80710`;
-
-    const ws = new WebSocket(wsUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
-        'Origin': 'chrome-extension://jdiccldimpdaibhpobmhopjdcmbcalmj'
-      }
-    });
-
-    const audioBuffers = [];
-    let isFinished = false;
-
-    const timer = setTimeout(() => {
-      if (!isFinished) {
-        isFinished = true;
-        try { ws.close(); } catch(e) {}
-        if (audioBuffers.length > 0) resolve(Buffer.concat(audioBuffers));
-        else reject(new Error('Edge TTS WebSocket timeout'));
-      }
-    }, 12000);
-
-    ws.on('open', () => {
-      const configMsg = `X-Timestamp:${new Date().toISOString()}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataversion":"2020.08.18","outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}`;
-      ws.send(configMsg);
-
-      const escapedText = text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-
-      const ssmlMsg = `X-RequestId:${requestId}\r\nX-Timestamp:${new Date().toISOString()}\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='vi-VN'><voice name='${voiceName}'><prosody pitch='${pitch}' rate='${rate}'>${escapedText}</prosody></voice></speak>`;
-      ws.send(ssmlMsg);
-    });
-
-    ws.on('message', (data, isBinary) => {
-      if (isFinished) return;
-
-      if (isBinary) {
-        const str = data.toString('utf8', 0, 200);
-        const headerIdx = str.indexOf('Path:audio\r\n');
-        if (headerIdx !== -1) {
-          const headerLength = data.indexOf(Buffer.from('\r\n\r\n')) + 4;
-          if (headerLength > 4 && headerLength < data.length) {
-            audioBuffers.push(data.subarray(headerLength));
-          }
-        }
-      } else {
-        const textMsg = data.toString('utf8');
-        if (textMsg.includes('Path:turn.end')) {
-          isFinished = true;
-          clearTimeout(timer);
-          try { ws.close(); } catch(e) {}
-          if (audioBuffers.length > 0) resolve(Buffer.concat(audioBuffers));
-          else reject(new Error('No audio chunks received'));
-        }
-      }
-    });
-
-    ws.on('error', (err) => {
-      if (!isFinished) {
-        isFinished = true;
-        clearTimeout(timer);
-        if (audioBuffers.length > 0) resolve(Buffer.concat(audioBuffers));
-        else reject(err);
-      }
-    });
-
-    ws.on('close', () => {
-      if (!isFinished) {
-        isFinished = true;
-        clearTimeout(timer);
-        if (audioBuffers.length > 0) resolve(Buffer.concat(audioBuffers));
-        else reject(new Error('WebSocket closed unexpectedly'));
-      }
-    });
-  });
-}
 
 // Chạy edge-tts Python làm phương án dự phòng
 async function runEdgeTtsPython(voiceName, trimmedText, validRate, validPitch, tempFile) {

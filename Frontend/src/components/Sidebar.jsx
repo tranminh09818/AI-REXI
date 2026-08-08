@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
    Menu, Plus, MessageSquare,
    Layers, Zap, Search, Trash2, ChevronDown, FolderOpen,
-   User, Settings, LogOut, Headphones, Shield, BookOpen
+   User, Settings, LogOut, Headphones, Shield
   } from 'lucide-react';
 
 const RexiLogo = ({ className = "w-8 h-8" }) => (
@@ -16,7 +16,7 @@ export default function Sidebar({
   activeConvId, setActiveConvId,
   handleNewConversation, handleDeleteConversation,
   filesDrawerOpen, setFilesDrawerOpen, renderTree, fileTree,
-   setSkillsOpen, setSuperToolsOpen, setHelpOpen,
+   setSkillsOpen, setSuperToolsOpen,
   currentUser, setCurrentUser, setAuthToken, setAuthModalOpen, setSettingsOpen,
   apiFetch, showToast, setConversations
 }) {
@@ -104,9 +104,9 @@ export default function Sidebar({
       <div className="p-3">
         <button
           onClick={handleNewConversation}
-          className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-sm shadow-lg shadow-cyan-500/20 transition-all"
+          className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium text-xs transition-all"
         >
-          <Plus size={18} />
+          <Plus size={15} />
           <span>Cuộc Trò Chuyện Mới</span>
         </button>
       </div>
@@ -114,24 +114,18 @@ export default function Sidebar({
 
 
       {/* Skills & Super Tools Buttons */}
-      <div className="grid grid-cols-3 gap-2 px-3 mt-2">
+      <div className="grid grid-cols-2 gap-2 px-3 mt-2">
         <button
           onClick={() => setSkillsOpen(true)}
-          className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-purple-900/30 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-medium transition-all"
+          className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-purple-900/30 border border-purple-500/30 text-purple-300 hover:text-white text-[11px] font-medium transition-all"
         >
-          <Layers size={14} /> 35+ Skills
+          <Layers size={13} /> 35+ Skills
         </button>
         <button
           onClick={() => setSuperToolsOpen(true)}
-          className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-amber-900/30 border border-amber-500/30 text-amber-300 hover:text-white text-xs font-medium transition-all"
+          className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-amber-900/30 border border-amber-500/30 text-amber-300 hover:text-white text-[11px] font-medium transition-all"
         >
-          <Zap size={14} /> Super Tools
-        </button>
-        <button
-          onClick={() => setHelpOpen(true)}
-          className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-sky-900/30 border border-sky-500/30 text-sky-300 hover:text-white text-xs font-medium transition-all"
-        >
-          <BookOpen size={14} /> Hướng Dẫn
+          <Zap size={13} /> Super Tools
         </button>
       </div>
 

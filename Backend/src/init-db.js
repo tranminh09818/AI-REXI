@@ -3,7 +3,16 @@
  * Hỗ trợ cả SQLite (local) và PostgreSQL (Render) — FIX lỗi "chỉ chạy trên máy local"
  * vì trước đây schema chỉ tồn tại sẵn trong file SQLite, Postgres trên prod bị rỗng bảng.
  */
+const crypto = require('crypto');
 const db = require('./config/db');
+
+// Promise helpers cho adapter (callback-based)
+function runSql(sql, params = []) {
+  return new Promise((resolve, reject) => db.run(sql, params, (err) => err ? reject(err) : resolve()));
+}
+function getRow(sql, params = []) {
+  return new Promise((resolve, reject) => db.get(sql, params, (err, row) => err ? reject(err) : resolve(row)));
+}
 
 // ─── Schema gốc (dump từ SQLite chuẩn) — sắp theo thứ tự FK ─────────
 const TABLES = [
@@ -60,6 +69,29 @@ function execSql(sql) {
  * Khởi tạo schema — chạy mỗi lần server khởi động (idempotent, IF NOT EXISTS).
  * Gọi TRƯỚC ensureAdmin/ensureGuestUser để bảng đã tồn tại.
  */
+// JWT_SECRET tự động: nếu chưa set env → tạo + lưu app_settings (ổn định giữa restart, không cần set tay)
+async function ensureJwtSecret() {
+  if (process.env.JWT_SECRET) {
+    global.__JWT_SECRET = process.env.JWT_SECRET;
+    return;
+  }
+  try {
+    const row = await getRow("SELECT gia_tri FROM app_settings WHERE khoa = 'jwt_secret'");
+    if (row && row.gia_tri) {
+      global.__JWT_SECRET = row.gia_tri;
+      console.log('[init-db] JWT_SECRET đọc từ DB (ổn định giữa restart)');
+      return;
+    }
+    const secret = crypto.randomBytes(32).toString('hex');
+    await runSql("INSERT INTO app_settings (khoa, gia_tri) VALUES ('jwt_secret', ?) ON CONFLICT(khoa) DO UPDATE SET gia_tri = excluded.gia_tri", [secret]);
+    global.__JWT_SECRET = secret;
+    console.log('[init-db] Đã tự tạo JWT_SECRET và lưu vào DB — set env JWT_SECRET nếu muốn override');
+  } catch (e) {
+    console.warn('[init-db] Không lưu được JWT_SECRET vào DB (fallback random):', e.message);
+    global.__JWT_SECRET = crypto.randomBytes(32).toString('hex');
+  }
+}
+
 async function initDatabase() {
   const isPg = db.type === 'postgresql';
   let created = 0;
@@ -72,6 +104,7 @@ async function initDatabase() {
     const sql = idx.replace(/^CREATE INDEX /, 'CREATE INDEX IF NOT EXISTS ');
     try { await execSql(sql); } catch (e) { /* index đã có */ }
   }
+  await ensureJwtSecret();
   console.log(`[init-db] Schema sẵn sàng (${isPg ? 'PostgreSQL' : db.type}): ${created}/${TABLES.length} bảng`);
 }
 

@@ -71,12 +71,8 @@ app.use(helmet({ contentSecurityPolicy: false })); // Security headers (CSP tắ
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Session secret - TẠO RANDOM nếu không có env var (tốt hơn hardcode)
-// FIX: ưu tiên SESSION_SECRET, fallback JWT_SECRET (ổn định giữa các lần restart thay vì random mỗi lần)
-const sessionSecret = process.env.SESSION_SECRET || process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
-if (!process.env.JWT_SECRET) {
-  console.warn('[WARN] JWT_SECRET chưa được cấu hình trong .env — token sẽ hết hiệu lực mỗi lần restart server. Nên thêm JWT_SECRET vào .env.');
-}
+// Session secret - ưu tiên SESSION_SECRET, fallback JWT_SECRET / global.__JWT_SECRET (init-db tự tạo + lưu DB)
+const sessionSecret = process.env.SESSION_SECRET || process.env.JWT_SECRET || global.__JWT_SECRET || crypto.randomBytes(32).toString('hex');
 app.use(session({
   secret: sessionSecret,
   resave: false,

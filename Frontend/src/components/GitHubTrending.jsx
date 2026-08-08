@@ -551,26 +551,6 @@ export default function GitHubTrending({ token }) {
     }
   }, [token, language, period]);
 
-  const handleForceRefresh = async () => {
-    setRefreshing(true);
-    try {
-      const params = new URLSearchParams();
-      if (language) params.set('language', language);
-      params.set('since', period);
-      const data = await apiFetch(`/admin/github/trending?${params}&force=1`, token);
-      if (data.success) {
-        setRepos(data.repos);
-        setLastUpdated(new Date());
-        setIsCached(false);
-        setFetchedAt(data.fetched_at || null);
-      }
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -597,17 +577,89 @@ export default function GitHubTrending({ token }) {
   const fetchStarredStatus = useCallback(async (repoList) => {
     if (!repoList || repoList.length === 0) return;
     try {
-      // Chỉ check top 10 để tránh rate limit GitHub API
-      const checks = repoList.slice(0, 10).map(async (repo) => {
-        try {
-          const data = await apiFetch(`/admin/github/starred/${repo.owner || repo.full_name.split('/')[0]}/${repo.name || repo.full_name.split('/')[1]}`, token);
-          return { full_name: repo.full_name, starred: data.starred };
-        } catch { return { full_name: repo.full_name, starred: false }; }
+      // Batch check — 1 API call instead of N
+      const repos = repoList.slice(0, 30).map(repo => ({
+        owner: repo.owner || repo.full_name.split('/')[0],
+        name: repo.name || repo.full_name.split('/')[1],
+      }));
+      const data = await apiFetch('/admin/github/starred/batch', token, {
+        method: 'POST',
+        body: JSON.stringify({ repos }),
       });
-      const results = await Promise.all(checks);
-      setStarredRepos(new Set(results.filter(r => r.starred).map(r => r.full_name)));
+      if (data.success && data.starred) {
+        const starred = new Set(Object.entries(data.starred).filter(([, v]) => v).map(([k]) => k));
+        setStarredRepos(starred);
+      }
     } catch { /* ignore */ }
   }, [token]);
+
+  // ─── REAL-TIME: Refresh tất cả data ───────────────────────────
+  const refreshAll = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // Parallel fetch tất cả data sources
+      const promises = [];
+
+      // 1. Trending repos
+      promises.push(
+        (async () => {
+          try {
+            const params = new URLSearchParams();
+            if (language) params.set('language', language);
+            params.set('since', period);
+            const data = await apiFetch(`/admin/github/trending?${params}`, token);
+            if (data.success) {
+              setRepos(data.repos);
+              setLastUpdated(new Date());
+              setIsCached(data.cached || false);
+              setFetchedAt(data.fetched_at || null);
+              // Sau khi load trending xong, check star status
+              setTimeout(() => {
+                if (data.repos?.length > 0) fetchStarredStatus(data.repos);
+              }, 300);
+            }
+          } catch { /* ignore */ }
+        })()
+      );
+
+      // 2. Notifications
+      promises.push(
+        (async () => {
+          try {
+            const data = await apiFetch('/admin/github/notifications', token);
+            if (data.success) {
+              setNotifications(data.notifications || []);
+              setUnreadCount(data.unread_count || 0);
+            }
+          } catch { /* ignore */ }
+        })()
+      );
+
+      // 3. Saved repos (nếu đang ở tab saved)
+      promises.push(
+        (async () => {
+          try {
+            const data = await apiFetch('/admin/github/saved', token);
+            if (data.success) setSavedRepos(data.repos);
+          } catch { /* ignore */ }
+        })()
+      );
+
+      // 4. GitHub starred (nếu đang ở tab starred)
+      promises.push(
+        (async () => {
+          try {
+            const data = await apiFetch('/admin/github/starred', token);
+            if (data.success) setGithubStarred(data.repos || []);
+          } catch { /* ignore */ }
+        })()
+      );
+
+      await Promise.allSettled(promises);
+    } catch { /* ignore */ } finally {
+      setRefreshing(false);
+    }
+  }, [token, language, period, fetchStarredStatus]);
 
   useEffect(() => {
     fetchTrending().then(() => {
@@ -621,6 +673,32 @@ export default function GitHubTrending({ token }) {
       }, 500);
     });
   }, [fetchTrending]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── REAL-TIME: Auto-refresh khi quay lại tab + polling 60s ──
+  useEffect(() => {
+    let pollInterval = null;
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshAll();
+      }
+    };
+
+    // Khi quay lại tab → refresh tất cả
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // Polling tự động mỗi 60 giây (chỉ khi tab visible)
+    pollInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        refreshAll();
+      }
+    }, 60000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [refreshAll]);
 
   const fetchSaved = useCallback(async () => {
     setSavedLoading(true);
@@ -876,12 +954,12 @@ export default function GitHubTrending({ token }) {
             )}
           </div>
           
-          <button onClick={handleForceRefresh} disabled={refreshing}
+          <button onClick={() => { setSearchResults(null); refreshAll(); }} disabled={refreshing}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-xs text-purple-300 hover:text-purple-200 transition-colors disabled:opacity-50" title="Force refresh from GitHub">
             <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
             <span className="hidden sm:inline">Refresh Live</span>
           </button>
-          <button onClick={() => { setSearchResults(null); fetchTrending(); }}
+          <button onClick={() => { setSearchResults(null); refreshAll(); }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-slate-300 hover:text-white transition-colors">
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             <span className="hidden sm:inline">Làm mới</span>

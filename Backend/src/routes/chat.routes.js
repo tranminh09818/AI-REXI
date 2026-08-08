@@ -655,8 +655,11 @@ router.post('/conversations/:id/messages', (req, res, next) => {
           const skillPrompts = [];
           for (const skill of allSkills) {
             const possiblePaths = [
-              path.join(__dirname, '..', '..', '..', '.agents', 'skills', skill.ten_ky_nang, 'SKILL.md'),
+              // Ưu tiên 1: Skills trong dự án AI REXI
+              path.join(__dirname, '..', '..', 'skills', skill.ten_ky_nang, 'SKILL.md'),
+              // Ưu tiên 2: Skills của opencode
               path.join(process.env.USERPROFILE || process.env.HOME, '.agents', 'skills', skill.ten_ky_nang, 'SKILL.md'),
+              // Ưu tiên 3: Skills của Gemini
               path.join(process.env.USERPROFILE || process.env.HOME, '.gemini', 'config', 'skills', skill.ten_ky_nang, 'SKILL.md')
             ];
             let skillContent = null;
@@ -955,7 +958,7 @@ async function buildChatContext(req, id, mode, noi_dung, user_location) {
     const skillPrompts = [];
     for (const skill of allSkills) {
       const possiblePaths = [
-        path.join(__dirname, '..', '..', '..', '.agents', 'skills', skill.ten_ky_nang, 'SKILL.md'),
+        path.join(__dirname, '..', '..', 'skills', skill.ten_ky_nang, 'SKILL.md'),
         path.join(process.env.USERPROFILE || process.env.HOME, '.agents', 'skills', skill.ten_ky_nang, 'SKILL.md'),
         path.join(process.env.USERPROFILE || process.env.HOME, '.gemini', 'config', 'skills', skill.ten_ky_nang, 'SKILL.md')
       ];

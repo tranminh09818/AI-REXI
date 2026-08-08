@@ -1,7 +1,12 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const db = require('../config/db');
-const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? (() => { throw new Error('JWT_SECRET phải được cấu hình trong production!') })() : 'dev-only-secret-' + crypto.randomBytes(16).toString('hex'));
+
+// FIX PROD: KHÔNG THROW khi production thiếu JWT_SECRET (trước đây → backend không khởi động nổi).
+// Secret được giải quyết động: env → global.__JWT_SECRET (tự tạo + lưu DB bởi init-db.js) → random.
+function getJWTSecret() {
+  return process.env.JWT_SECRET || global.__JWT_SECRET || ('dev-only-secret-' + crypto.randomBytes(16).toString('hex'));
+}
 
 // Middleware kiểm tra đã đăng nhập chưa
 function authMiddleware(req, res, next) {
@@ -16,7 +21,7 @@ function authMiddleware(req, res, next) {
 
     const token = authHeader.split(' ')[1];
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const decoded = jwt.verify(token, getJWTSecret());
         // FIX SECURITY: user bị khoá (banned) KHÔNG được dùng token tiếp (kể cả token cũ)
         db.get("SELECT phan_quyen, trang_thai FROM nguoi_dung WHERE ma_nguoi_dung = ?", [decoded.id], (err, row) => {
           if (err) {
@@ -110,4 +115,4 @@ function getGuestLimits(req) {
     };
 }
 
-module.exports = { authMiddleware, adminMiddleware, guestMiddleware, guestAgentMiddleware, getGuestLimits, JWT_SECRET };
+module.exports = { authMiddleware, adminMiddleware, guestMiddleware, guestAgentMiddleware, getGuestLimits, getJWTSecret };
