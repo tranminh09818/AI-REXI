@@ -5,7 +5,8 @@ services:
     rootDir: Backend
     branch: main
     plan: free
-    buildCommand: npm install
+    # Build cả Frontend → server.js serve dist/ (nếu không build, trang sẽ trắng)
+    buildCommand: npm install && cd ../Frontend && npm install && npm run build
     startCommand: node server.js
     healthCheckPath: /api/chat/guest-limits
     envVars:
@@ -26,6 +27,9 @@ services:
       - key: PGSSL
         value: "true"
       - key: SESSION_SECRET
+        sync: false
+      # BẮT BUỘC: auth.middleware THROW khi production không có JWT_SECRET → backend không khởi động được
+      - key: JWT_SECRET
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false

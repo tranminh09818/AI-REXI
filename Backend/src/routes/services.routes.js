@@ -1272,9 +1272,10 @@ router.post('/video/render', authMiddleware, async (req, res) => {
 
     // Set FFmpeg/FFprobe path in env for hyperframes
     const env = { ...process.env };
-    const ffmpegDir = ffmpegPath ? path.dirname(ffmpegPath) : 'D:\\ffmpeg-static';
-    env.FFMPEG_PATH = ffmpegPath || 'D:\\ffmpeg-static\\ffmpeg.exe';
-    env.PATH = `${ffmpegDir};${env.PATH || ''}`;
+    // FIX PROD: bỏ đường dẫn Windows cứng — dùng ffmpeg-static (npm) + path.delimiter (; trên Windows, : trên Linux/Render)
+    const ffmpegDir = ffmpegPath ? path.dirname(ffmpegPath) : '';
+    env.FFMPEG_PATH = ffmpegPath || '';
+    env.PATH = ffmpegDir ? `${ffmpegDir}${path.delimiter}${env.PATH || ''}` : env.PATH;
 
     // Run hyperframes render (dimensions set in HTML, not CLI flags)
     const args = [

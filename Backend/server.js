@@ -1,5 +1,4 @@
 const express = require('express');
-const cors = require('cors');
 const path = require('path');
 const session = require('express-session');
 const helmet = require('helmet');
@@ -49,20 +48,25 @@ const PORT = parseInt(envPortMatch && envPortMatch[1], 10) || parseInt(process.e
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',')
   : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5000', 'http://127.0.0.1:5000', 'http://[::1]:5173', 'http://[::1]:5000'];
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    // Cho phép origin local hợp lệ — regex chính xác, chống giả mạo kiểu evil-localhost.com
-    if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin)) {
-      return callback(null, true);
-    }
-    const envAllowed = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) : [];
-    if (envAllowed.includes(origin)) return callback(null, true);
-    // FIX CORS: chặn origin không thuộc danh sách cho phép (trước đây cho phép mọi origin + credentials)
-    return callback(new Error('Origin không được phép bởi CORS'));
-  },
-  credentials: true
-}));
+// CORS thủ công: cho phép local + SAME-ORIGIN (FE được serve từ backend trên Render → Origin trùng Host)
+// + ALLOWED_ORIGINS env. Trước đây same-origin trên Render bị chặn nếu quên set ALLOWED_ORIGINS.
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (!origin) return next();
+  const host = req.headers.host;
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin);
+  const sameOrigin = host && (origin === `http://${host}` || origin === `https://${host}`);
+  const envAllowed = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) : [];
+  if (isLocal || sameOrigin || envAllowed.includes(origin) || allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+  }
+  next();
+});
 app.use(helmet({ contentSecurityPolicy: false })); // Security headers (CSP tắt để không chặn hls.js/fonts CDN)
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
