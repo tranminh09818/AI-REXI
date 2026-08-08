@@ -293,6 +293,7 @@ export default function App() {
   // AI Configuration State
   const [provider, setProvider] = useState(() => localStorage.getItem('rexi_provider') || 'gemini');
   const [modelName, setModelName] = useState(() => localStorage.getItem('rexi_model') || '');
+  const lastAutoSwapRef = useRef(''); // chống toast đúp khi nhiều nguồn refresh model cùng lúc
   const [apiKey, setApiKey] = useState(() => {
     const saved = localStorage.getItem('rexi_api_key') || '';
     const token = localStorage.getItem('rexi_token') || '';
@@ -419,9 +420,23 @@ export default function App() {
         if (allArr.length > 0) {
           const currentExist = allArr.find(m => m.id === modelName);
           if (!currentExist) {
-            setModelName(allArr[0].id);
-            if (allArr[0].provider) setProvider(allArr[0].provider);
-            localStorage.setItem('rexi_model', allArr[0].id);
+            // 🔄 THUẬT TOÁN BẢO TOÀN PHIÊN (Safe Swap): model đang chọn vừa bị lượt quét mới
+            // xóa/thay thế → KHÔNG đổi model âm thầm. Chọn model thay thế gần nhất:
+            // 1) Ưu tiên model CÙNG nhà cung cấp (giữ đúng ý định người dùng)
+            // 2) Nếu nhà cung cấp cũng biến mất → model đầu tiên còn sống
+            // Rồi báo rõ cho người dùng bằng toast (bỏ qua nếu chưa từng chọn model = lần đầu mở).
+            const oldSelected = availableModels.find(m => m.id === modelName);
+            const oldProviderName = (oldSelected ? oldSelected.provider : '') || (modelName.split('/')[0] || '');
+            const sameProvider = allArr.find(m => String(m.provider || '').toLowerCase() === String(oldProviderName).toLowerCase());
+            const replacement = sameProvider || allArr[0];
+            setModelName(replacement.id);
+            if (replacement.provider) setProvider(replacement.provider);
+            localStorage.setItem('rexi_model', replacement.id);
+            // Toast đúng 1 lần cho mỗi model bị thay (chống đúp khi SSE + interval + event chạy cùng lúc)
+            if (modelName && lastAutoSwapRef.current !== modelName) {
+              lastAutoSwapRef.current = modelName;
+              showToast(`⚠️ ${modelName} không còn khả dụng sau lượt quét — tự chuyển sang ${replacement.id}`, 'info');
+            }
           }
         }
       } else {

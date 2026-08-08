@@ -277,6 +277,9 @@ async function scanProvider(providerId) {
 
   console.log(`[ModelScanner] Scanning ${cfg.name}...`);
 
+  // ⏱️ Ghi thời điểm thử quét NGAY từ đầu (kể cả fetch fail) để cooldown startup áp dụng cho mọi provider
+  saveProviderScanTime(providerId, 0, 0);
+
   const { success, models, error } = await fetchModels(providerId, apiKey, cfg.endpoint, cfg.auth);
   if (!success) {
     console.error(`[ModelScanner] ${cfg.name} fetch failed: ${error}`);
@@ -310,6 +313,7 @@ async function scanProvider(providerId) {
   const modelsToTest = models;
   const results = [];
   const BATCH = 15;
+  const BATCH_DELAY_MS = 800; // giãn cách giữa các batch → tránh chạm rate-limit chung của provider (ảnh hưởng người dùng đang chat cùng lúc)
   let consecutiveFailures = 0;
 
   const filteredModels = modelsToTest;
@@ -334,6 +338,12 @@ async function scanProvider(providerId) {
     if (i === 0 && consecutiveFailures >= batch.length) {
       console.log(`[ModelScanner] ${cfg.name}: first batch all failed with auth errors — key likely invalid, stopping early`);
       break;
+    }
+
+    // ⏱️ Pacing: nghỉ ngắn giữa các batch để không bắn dồn dập request
+    // → giảm nguy cơ chạm rate-limit chung của provider (quota dùng chung với người dùng đang chat)
+    if (i + BATCH < filteredModels.length) {
+      await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
     }
   }
 
@@ -422,6 +432,23 @@ function cleanupStaleModels(providerId) {
   } catch(e) { /* ignore */ }
 }
 
+// ⏱️ Cooldown quét khi khởi động server: nếu provider vừa được quét trong khoảng thời gian này
+// (mặc định 6h) thì bỏ qua — tránh đốt quota free + không làm gián đoạn người dùng khi restart.
+const STARTUP_SCAN_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+
+// Kiểm tra provider có được quét gần đây chưa (dựa trên provider_scan_log)
+function wasRecentlyScanned(providerId, cooldownMs) {
+  try {
+    const d = getDB();
+    if (!d) return false;
+    const row = d.prepare('SELECT lan_quet_cuoi FROM provider_scan_log WHERE ma_nha_cung_cap = ?').get(providerId);
+    if (!row || !row.lan_quet_cuoi) return false;
+    const last = new Date(String(row.lan_quet_cuoi).replace(' ', 'T') + 'Z').getTime(); // datetime('now') lưu UTC
+    if (isNaN(last)) return false;
+    return (Date.now() - last) < cooldownMs;
+  } catch (e) { return false; }
+}
+
 // Quét khi server khởi động — chỉ scan provider có key, bỏ qua provider không có key
 async function scanOnStartup() {
   console.log('[ModelScanner] Startup scan: checking providers with keys...');
@@ -431,6 +458,11 @@ async function scanOnStartup() {
     // Bỏ qua provider KHÔNG có key, TRỪ các provider không cần key (local CLI / free)
     if (!apiKey && !['opencode'].includes(providerId)) {
       cleanupStaleModels(providerId); // provider không có key → dọn model ma cũ của họ
+      continue;
+    }
+    // ⏱️ Cooldown: provider vừa quét < 6h trước → bỏ qua (không đốt quota, không làm phiền người dùng)
+    if (wasRecentlyScanned(providerId, STARTUP_SCAN_COOLDOWN_MS)) {
+      console.log(`[ModelScanner] Startup: bỏ qua ${providerId} — đã quét gần đây (cooldown 6h)`);
       continue;
     }
     try {
