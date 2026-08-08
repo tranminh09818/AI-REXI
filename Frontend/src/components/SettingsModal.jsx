@@ -55,19 +55,7 @@ export default function SettingsModal({
       localStorage.setItem('rexi_base_url', provInfo.defaultBaseUrl);
     }
 
-    // Auto-fill model gợi ý
-    const defaultModels = {
-      gemini: 'gemini-3.6-flash',
-      openai: 'gpt-4o',
-      claude: 'claude-3-5-sonnet-20241022',
-      deepseek: 'deepseek-chat',
-      groq: 'llama-3.3-70b-versatile',
-      github: 'gpt-4o',
-    };
-    if (defaultModels[newProv]) {
-      setModelName(defaultModels[newProv]);
-      localStorage.setItem('rexi_model', defaultModels[newProv]);
-    }
+    // KHÔNG gợi ý model mẫu — để hệ thống tự chọn model working đầu tiên của provider
   };
 
   if (!settingsOpen) return null;
@@ -118,7 +106,7 @@ export default function SettingsModal({
               type="text"
               value={modelName}
               onChange={e => { setModelName(e.target.value); localStorage.setItem('rexi_model', e.target.value); }}
-              placeholder="vd: gemini-3.6-flash, gpt-4o, claude-3-5-sonnet..."
+              placeholder="vd: tên model có trong danh sách..."
               className="w-full px-3 py-2.5 bg-[#0d0e11] border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/50 font-mono"
             />
           </div>

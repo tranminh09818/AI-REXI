@@ -332,8 +332,8 @@ router.post('/fetch-models', authMiddleware, async (req, res) => {
       } else if (data.error) {
         return res.json({ success: false, error: 'GitHub Models: ' + (data.error.message || JSON.stringify(data.error)) });
       } else {
-        // Fallback default GitHub free models list if API doesn't return full array
-        modelsList = ['gpt-4o', 'gpt-4o-mini', 'o1-mini', 'DeepSeek-R1', 'DeepSeek-V3', 'meta-llama-3.1-405b-instruct', 'Phi-3-medium-instruct'];
+        // KHÔNG dùng danh sách model mẫu — trả lỗi để thấy API trả sai định dạng
+        return res.json({ success: false, error: 'GitHub Models: API trả về định dạng không hợp lệ (không dùng dữ liệu mẫu)' });
       }
 
     } else if (provider === 'custom') {
@@ -369,11 +369,8 @@ router.post('/fetch-models', authMiddleware, async (req, res) => {
           modelsList = [...freeModels, ...otherModels];
         }
       } catch (errModels) {
-        modelsList = [
-          'opencode/deepseek-v4-flash-free',
-          'opencode/qwen-2.5-coder-32b-free',
-          'opencode/llama-3.3-70b-free'
-        ];
+        // KHÔNG chèn model mẫu khi CLI lỗi — báo lỗi rõ ràng
+        return res.json({ success: false, error: 'OpenCode: ' + (errModels.message || 'CLI lỗi — không thể lấy danh sách model') });
       }
     }
 

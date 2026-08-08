@@ -303,7 +303,7 @@ export default function App() {
 
   // AI Configuration State
   const [provider, setProvider] = useState(() => localStorage.getItem('rexi_provider') || 'gemini');
-  const [modelName, setModelName] = useState(() => localStorage.getItem('rexi_model') || 'gemini-3.6-flash');
+  const [modelName, setModelName] = useState(() => localStorage.getItem('rexi_model') || '');
   const [apiKey, setApiKey] = useState(() => {
     const saved = localStorage.getItem('rexi_api_key') || '';
     const token = localStorage.getItem('rexi_token') || '';

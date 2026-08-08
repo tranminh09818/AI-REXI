@@ -305,7 +305,8 @@ async function fetchModelsFromProvider(provider, apiKey, baseUrl) {
     if (Array.isArray(data)) modelsList = data.map(m => m.name || m.id);
     else if (data.data && Array.isArray(data.data)) modelsList = data.data.map(m => m.id || m.name);
     else if (data.error) return { success: false, error: 'GitHub Models: ' + (data.error.message || JSON.stringify(data.error)) };
-    else modelsList = ['gpt-4o', 'gpt-4o-mini', 'o1-mini', 'DeepSeek-R1', 'DeepSeek-V3', 'meta-llama-3.1-405b-instruct', 'Phi-3-medium-instruct'];
+    // KHÔNG dùng danh sách model mẫu — trả lỗi để Admin thấy API trả sai định dạng
+    else return { success: false, error: 'GitHub Models: API trả về định dạng không hợp lệ (không dùng dữ liệu mẫu)' };
   } else if (provider === 'opencode') {
     try {
       if (!IS_OPENCODE_AVAILABLE) throw new Error('OpenCode binary not found.');
@@ -313,7 +314,8 @@ async function fetchModelsFromProvider(provider, apiKey, baseUrl) {
       const rawList = stdout.split('\n').map(m => m.trim()).filter(m => m.length > 0);
       modelsList = [...rawList.filter(m => m.toLowerCase().includes('free')), ...rawList.filter(m => !m.toLowerCase().includes('free'))];
     } catch (errModels) {
-      modelsList = ['opencode/deepseek-v4-flash-free', 'opencode/qwen-2.5-coder-32b-free', 'opencode/llama-3.3-70b-free'];
+      // KHÔNG chèn model mẫu khi CLI lỗi — báo lỗi rõ ràng
+      return { success: false, error: 'OpenCode: ' + (errModels.message || 'CLI lỗi — không thể lấy danh sách model') };
     }
   } else {
     // custom
