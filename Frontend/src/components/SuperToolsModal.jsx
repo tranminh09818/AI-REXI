@@ -4,7 +4,7 @@ import { X, Terminal, GitBranch, Activity, Trash2 } from 'lucide-react';
 export default function SuperToolsModal({
   superToolsOpen, setSuperToolsOpen,
   execCommand, setExecCommand, execOutput, handleExecCommand,
-  gitStatus, gitDiff, fetchGitStatus, fetchGitDiff,
+  gitStatus, _gitDiff, fetchGitStatus, fetchGitDiff,
   memories, newMemory, setNewMemory, handleAddMemory, handleDeleteMemory
 }) {
   if (!superToolsOpen) return null;

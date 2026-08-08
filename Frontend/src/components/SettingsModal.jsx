@@ -1,6 +1,6 @@
 import { API_BASE } from '../config';
 import React, { useState, useEffect } from 'react';
-import { X, Settings, Eye, EyeOff, RefreshCw, Zap, Globe } from 'lucide-react';
+import { X, Settings, Eye, EyeOff, RefreshCw, Zap } from 'lucide-react';
 
 const FALLBACK_PROVIDERS = {
   gemini: { name: 'Google Gemini', placeholder: 'AIzaSy...', defaultBaseUrl: '' },

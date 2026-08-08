@@ -3,15 +3,35 @@
 // ═══════════════════════════════════════════════════════════
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  Menu, X, Send, Plus, Settings, Layers, Bot, User,
-  FileText, Key, Trash2, Code2, Database, Search,
-  Copy, Check, AlertTriangle, Folder, FolderOpen, Save,
-  Mic, Volume2, Download, Cpu, Paperclip, Image, FileCode,
-  Globe, ChevronDown, Zap, MessageSquare, MoreHorizontal,
-  ThumbsUp, ThumbsDown, RefreshCw, Edit3, Star, Play, ArrowUp, ArrowDown,
-  Sparkles, Monitor, Sun, Moon, Tv, Eye, Code, Layout, Sliders,
-  ChevronRight, ChevronUp, Activity, Terminal, Shield, Radio, HeartPulse, Wifi, FileSpreadsheet, Presentation, LogOut, LogIn, Lock, ToggleLeft, ToggleRight, Server, GitBranch, GitCommit, EyeOff,
-  Video, BookOpen
+  Menu,
+  X,
+  Settings,
+  Layers,
+  Bot, Code,
+  Trash2,
+  Database,
+  Search,
+  Check,
+  AlertTriangle,
+  Folder,
+  Mic,
+  Download,
+  Cpu,
+  FileCode,
+  ChevronDown,
+  Zap,
+  MessageSquare,
+  RefreshCw,
+  Monitor,
+  Tv,
+  Eye,
+  ChevronUp,
+  Terminal,
+  Shield,
+  GitBranch,
+  EyeOff,
+  Video,
+  BookOpen
 } from 'lucide-react';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
@@ -26,7 +46,6 @@ import CodeEditorTab from './components/CodeEditorTab';
 import IPTVTab from './components/IPTVTab';
 import SettingsModal from './components/SettingsModal';
 import SkillsModal from './components/SkillsModal';
-import SuperToolsModal from './components/SuperToolsModal';
 import AdminPanel from './AdminPanel';
 import StudioTab from './components/StudioTab';
 import VideoCreatorTab from './components/VideoCreatorTab';
@@ -222,10 +241,7 @@ const ModelSelectorPopover = ({ availableModels, modelName, setModelName, setPro
   );
 };
 
-// Rexi Animated SVG Logo Component
-const RexiLogo = ({ className = "w-8 h-8" }) => (
-  <img src="/rexi_cat_icon.png" alt="Rexi" className={`rexi-logo object-contain ${className}`} />
-);
+
 
 // FAB menu item (icon + label + description)
 const FabItem = ({ item, activeTab, onPick }) => (
@@ -245,13 +261,7 @@ const FabItem = ({ item, activeTab, onPick }) => (
   </button>
 );
 
-const POPULAR_MODELS = [
-  { id: 'gemini-3.6-flash', provider: 'gemini', name: 'Gemini 3.6 Flash', label: 'Fast & Smart', type: 'free' },
-  { id: 'gemini-3.1-pro-high', provider: 'gemini', name: 'Gemini 3.1 Pro High', label: 'Reasoning', type: 'pro' },
-  { id: 'claude-3-5-sonnet-20241022', provider: 'claude', name: 'Claude 3.5 Sonnet', label: 'Coding Pro', type: 'pro' },
-  { id: 'opencode/deepseek-v4-flash-free', provider: 'opencode', name: 'DeepSeek V4 Pro', label: 'Free Agent', type: 'free' },
-  { id: 'opencode/qwen-2.5-coder-32b-free', provider: 'opencode', name: 'Qwen Coder 2.5', label: 'Free Code', type: 'free' },
-];
+
 
 
 const AI_SPECIALTIES = [
@@ -263,20 +273,9 @@ const AI_SPECIALTIES = [
   { id: 'coder', name: '💻 Lập Trình & Architect' }
 ];
 
-const SUGGESTION_PROMPTS = [
-  { icon: <Code2 className="text-cyan-400" size={18} />, title: 'Viết REST API Backend', desc: 'Node.js Express + SQLite CSDL' },
-  { icon: <Database className="text-purple-400" size={18} />, title: 'Thiết Kế CSDL SQL', desc: 'Đặc tả 13 bảng chi tiết' },
-  { icon: <FileText className="text-blue-400" size={18} />, title: 'Soạn Hợp Đồng Kinh Tế', desc: 'Công văn & mẫu hợp đồng doanh nghiệp' },
-  { icon: <Zap className="text-amber-400" size={18} />, title: 'Kịch Bản Video Short', desc: 'Ý tưởng TikTok/Reels triệu view' },
-];
 
-const QUICK_CHIPS = [
-  { id: 'web', name: '🌐 Trang Web', prompt: 'Hãy tìm kiếm thông tin thời gian thực trên Internet về: ' },
-  { id: 'research', name: '🔬 Nghiên Cứu Sâu', prompt: 'Hãy phân tích chuyên sâu tài liệu uy tín về: ' },
-  { id: 'doc', name: '📚 Phân Tích DOCX', prompt: 'Hãy tóm tắt và trích xuất ý chính tài liệu sau: ' },
-  { id: 'sheet', name: '📊 Trang Tính Excel', prompt: 'Hãy tạo bảng tính Excel kèm công thức cho: ' },
-  { id: 'slide', name: '🖥️ Tạo Slide PPT', prompt: 'Hãy thiết kế bộ Slide 5 trang chuyên nghiệp về: ' }
-];
+
+
 
 export default function App() {
   const [conversations, setConversations] = useState([]);
@@ -285,14 +284,12 @@ export default function App() {
   const [inputText, setInputText] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [superToolsOpen, setSuperToolsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotOtp, setForgotOtp] = useState('');
   const [forgotNewPassword, setForgotNewPassword] = useState('');
   const [forgotStep, setForgotStep] = useState('login');
@@ -340,10 +337,10 @@ export default function App() {
 
   // TTS Settings
   const [ttsVoice, setTtsVoice] = useState(() => localStorage.getItem('rexi_tts_voice') || 'vi-VN-HoaiMyNeural');
-  const [ttsRate, setTtsRate] = useState(() => localStorage.getItem('rexi_tts_rate') || '+0%');
-  const [ttsPitch, setTtsPitch] = useState(() => localStorage.getItem('rexi_tts_pitch') || '+0%');
+  const [ttsRate] = useState(() => localStorage.getItem('rexi_tts_rate') || '+0%');
+  const [ttsPitch] = useState(() => localStorage.getItem('rexi_tts_pitch') || '+0%');
   const [ttsVoices, setTtsVoices] = useState([]);
-  const [ttsVoicesLoading, setTtsVoicesLoading] = useState(true);
+  const [, setTtsVoicesLoading] = useState(true);
   const [ttsUsingServer, setTtsUsingServer] = useState(() => {
     const saved = localStorage.getItem('rexi_tts_mode');
     return saved === 'server' && !!localStorage.getItem('rexi_token');
@@ -360,7 +357,6 @@ export default function App() {
   const [iptvTab, setIptvTab] = useState('category'); // 'category' | 'country'
   const [iptvCountry, setIptvCountry] = useState('VN');
   const [iptvSubtitleOn, setIptvSubtitleOn] = useState(false);
-  const [iptvSubtitleText, setIptvSubtitleText] = useState('');
   const iptvVideoRef = useRef(null);
   const hlsRef = useRef(null);
 
@@ -384,7 +380,7 @@ export default function App() {
   const [newMemory, setNewMemory] = useState('');
 
   // Rate Limit Toast
-  const [rateLimitToast, setRateLimitToast] = useState('');
+  const [, setRateLimitToast] = useState('');
   const rateLimitTimerRef = useRef(null);
 
   // General Toast
@@ -398,7 +394,6 @@ export default function App() {
     toastTimerRef.current = setTimeout(() => setToastMsg(''), 3000);
   };
 
-  const [selectedProvider, setSelectedProvider] = useState(() => localStorage.getItem('rexi_provider') || 'gemini');
 
   // Auth Token
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('rexi_token') || null);
@@ -443,7 +438,7 @@ export default function App() {
       } else {
         setAvailableModels([]);
       }
-    } catch (e) {
+    } catch {
       setAvailableModels([]);
     }
   };
@@ -506,7 +501,6 @@ export default function App() {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   };
   const fileInputRef = useRef(null);
-  const textareaRef = useRef(null);
 
    useEffect(() => {
     const fetchTtsVoices = async () => {
@@ -519,14 +513,14 @@ export default function App() {
         if (data.success && data.voices) {
           setTtsVoices(data.voices);
         }
-      } catch (err) {
+      } catch {
         console.log('[TTS] Could not fetch voices, using defaults');
       } finally {
         setTtsVoicesLoading(false);
       }
     };
     fetchTtsVoices();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Token hết hạn → xóa token cũ, mở màn hình đăng nhập để user đăng nhập lại
   useEffect(() => {
@@ -576,7 +570,7 @@ export default function App() {
     fetchMemories();
     fetchAvailableModels();
     if (!currentUser) fetchGuestLimits();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Khi có model mới được đăng tải hoặc quét xong từ Admin Panel → load lại danh sách model ở Menu Header Trang Chủ
   useEffect(() => {
@@ -587,7 +581,7 @@ export default function App() {
     };
     window.addEventListener('rexi_models_published', handleModelsPublished);
     return () => window.removeEventListener('rexi_models_published', handleModelsPublished);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // SSE: tự động cập nhật danh sách model khi backend scan xong hoặc Admin cập nhật
   useEffect(() => {
@@ -597,11 +591,11 @@ export default function App() {
         const data = JSON.parse(e.data);
         console.log('[SSE] Model scan/update complete:', data);
         fetchAvailableModels();
-      } catch (err) {}
+      } catch {}
     };
     evtSource.onerror = () => {};
     return () => evtSource.close();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchGuestLimits = async () => {
     try {
@@ -609,7 +603,7 @@ export default function App() {
       if (data.success && data.limits && data.limits.messages) {
         setGuestLimits(data.limits);
       }
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
   };
 
   useEffect(() => {
@@ -618,7 +612,7 @@ export default function App() {
     } else {
       setMessages([]);
     }
-  }, [activeConvId]);
+  }, [activeConvId]); // eslint-disable-line react-hooks/exhaustive-deps
 
 useEffect(() => {
      if (chatScrollRef.current) {
@@ -696,7 +690,7 @@ useEffect(() => {
       else fetchIPTV(iptvCategory || 'news', null, iptvSearch);
     }, 300);
     return () => clearTimeout(timer);
-  }, [iptvSearch, iptvCategory, iptvCountry, iptvTab]);
+  }, [iptvSearch, iptvCategory, iptvCountry, iptvTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // HLS.js player for IPTV
   const playHlsStream = useCallback((url) => {
@@ -778,13 +772,13 @@ useEffect(() => {
     try {
       const d = await apiFetch('/chat/git/diff', { headers: authHeaders() });
       setGitDiff(d.diff || '');
-    } catch(e) {}
+    } catch {}
   };
 
   useEffect(() => {
     if (activeTab === 'iptv' && iptvChannels.length === 0) fetchIPTV('news');
     if (activeTab === 'desktop') fetchDesktopScreenshot();
-  }, [activeTab]);
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleNewConversation = async () => {
     // Nếu cuộc trò chuyện hiện tại chưa có tin nhắn nào → không cho tạo thêm
@@ -961,7 +955,7 @@ useEffect(() => {
           const line = evt.trim();
           if (!line.startsWith('data: ')) continue;
           let payload;
-          try { payload = JSON.parse(line.slice(6)); } catch (e) { continue; }
+          try { payload = JSON.parse(line.slice(6)); } catch { continue; }
           if (payload.type === 'token') { aiText += payload.text; updateAI(aiText); }
           else if (payload.type === 'status') { if (!aiText) updateAI(payload.message); }
           else if (payload.type === 'error') { aiText = payload.message; updateAI(aiText); }
@@ -988,7 +982,7 @@ useEffect(() => {
       }));
       fetchConversations();
       if (!currentUser) fetchGuestLimits();
-    } catch (e) {
+    } catch {
       if (streamStarted) {
         setMessages(prev => prev.map(m => m.ma_tin_nhan === streamMsgId ? { ...m, noi_dung: (m.noi_dung || '') + '\n\n⚠️ Kết nối stream bị ngắt.' } : m));
       } else {
@@ -1212,12 +1206,7 @@ useEffect(() => {
     } catch (e) { console.error(e); }
   };
 
-  const handleDeleteMemory = async (memId) => {
-    try {
-      await apiFetch(`/chat/memory/${memId}`, { method: 'DELETE' });
-      setMemories(prev => prev.filter(m => m.ma_bo_nho !== memId));
-    } catch (e) { console.error(e); }
-  };
+
 
   const handleAuthSubmit = async () => {
     try {
@@ -1255,41 +1244,10 @@ useEffect(() => {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('rexi_token');
-    localStorage.removeItem('rexi_user');
-    setAuthToken('');
-    setCurrentUser(null);
-  };
+
 
   // Google Sign-In Handler
-  const handleGoogleSignIn = async (response) => {
-    try {
-      const res = await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: response.credential }),
-        credentials: 'include'
-      });
-      const data = await res.json();
 
-      if (data.success && data.token) {
-        setAuthToken(data.token);
-        localStorage.setItem('rexi_token', data.token);
-        if (data.user) {
-          setCurrentUser(data.user);
-          localStorage.setItem('rexi_user', JSON.stringify(data.user));
-        }
-        setAuthModalOpen(false);
-        showToast('Đăng nhập Google thành công!');
-      } else {
-        alert(data.error || 'Đăng nhập Google thất bại');
-      }
-    } catch (e) {
-      console.error('[Auth] Google login failed:', e);
-      alert('Lỗi kết nối: ' + e.message);
-    }
-  };
 
   // Open Google OAuth popup → backend callback redirects popup to localhost:5173?google_token=...
   // Parent window detects token via storage event listener (useEffect above)
@@ -1366,7 +1324,7 @@ useEffect(() => {
         renderTree={renderTree} fileTree={fileTree}
          setSkillsOpen={setSkillsOpen} setSuperToolsOpen={setSuperToolsOpen} setHelpOpen={setHelpOpen}
         currentUser={currentUser} setCurrentUser={setCurrentUser} setAuthToken={setAuthToken}
-        setAuthModalOpen={setAuthModalOpen} setSettingsOpen={setSettingsOpen} setAdminOpen={setAdminOpen}
+        setAuthModalOpen={setAuthModalOpen} setSettingsOpen={setSettingsOpen}
         apiFetch={apiFetch} API_BASE={API_BASE} showToast={showToast} setConversations={setConversations}
       />
 

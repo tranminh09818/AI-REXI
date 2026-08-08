@@ -5,14 +5,13 @@ import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import {
   Shield, Users, MessageSquare, Key, Layers, Settings, Home,
   Activity, Trash2, Search, RefreshCw, ChevronLeft, ChevronRight,
-  Crown, User as UserIcon, Lock, Unlock, CheckCircle, XCircle,
-  AlertTriangle, BarChart3, Database, Zap, Send, Eye, EyeOff,
-  Server, GitBranch, Terminal, LogOut, X, Clock, Wifi, Tv, Globe, Radar, PlayCircle,
+  Crown, User as UserIcon, Lock, CheckCircle, XCircle,
+  AlertTriangle, Database, Send,
+  GitBranch, Terminal, X, Clock, Tv, Globe, Radar, PlayCircle,
   Plus, Pencil, Download, Loader2, Save, Bell, Code
 } from 'lucide-react';
 import { API_BASE, apiFetch } from './config';
 import GitHubTrending from './components/GitHubTrending';
-
 function codeToTwemojiUrl(code) {
   if (!code || code.length !== 2) return null;
   const c = code.toUpperCase();
@@ -76,43 +75,7 @@ function Toast({ message, type, onClose }) {
 // ═══════════════════════════════════════════════════════════
 // TAB: DASHBOARD
 // ═══════════════════════════════════════════════════════════
-function DashboardTab({ stats, statsLoading }) {
-  const cards = [
-    { icon: Users, label: 'Tổng User', value: stats?.tong_user, bg: 'bg-indigo-500/15', text: 'text-indigo-300', border: 'border-indigo-500/20' },
-    { icon: Crown, label: 'Admin', value: stats?.tong_admin, bg: 'bg-amber-500/15', text: 'text-amber-300', border: 'border-amber-500/20' },
-    { icon: Lock, label: 'Bị Khoá', value: stats?.tong_bi_khoa, bg: 'bg-rose-500/15', text: 'text-rose-300', border: 'border-rose-500/20' },
-    { icon: MessageSquare, label: 'Hội Thoại', value: stats?.tong_hoi_thoai, bg: 'bg-cyan-500/15', text: 'text-cyan-300', border: 'border-cyan-500/20' },
-    { icon: Activity, label: 'Tin Nhắn', value: stats?.tong_tin_nhan, bg: 'bg-emerald-500/15', text: 'text-emerald-300', border: 'border-emerald-500/20' },
-    { icon: Trash2, label: 'Thùng Rác', value: stats?.tong_xoa_mem, bg: 'bg-slate-500/15', text: 'text-slate-300', border: 'border-slate-500/20' },
-  ];
-  return (
-    <div className="space-y-6">
-      <h2 className="text-lg font-bold text-white flex items-center gap-2"><BarChart3 size={20} className="text-cyan-400" /> Dashboard Tổng Quan</h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {cards.map((c, i) => (
-          <div key={i} className="p-4 bg-[#181920] rounded-2xl border border-white/8 shadow flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl ${c.bg} ${c.text} border ${c.border}`}><c.icon size={20} /></div>
-            <div>
-              <p className="text-[10px] text-slate-500 uppercase font-semibold">{c.label}</p>
-              <p className={`text-xl font-bold ${c.text}`}>{statsLoading ? '...' : c.value ?? 0}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="p-4 bg-[#181920] rounded-2xl border border-white/8">
-        <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><Activity size={14} className="text-emerald-400" /> Hoạt Động Gần Đây</h3>
-        <div className="space-y-2 text-xs text-slate-400">
-          <div className="flex items-center gap-2"><Clock size={12} className="text-slate-500" /> Hệ thống đang hoạt động bình thường</div>
-          <div className="flex items-center gap-2"><Wifi size={12} className="text-emerald-400" /> Backend: {window.location.host || 'localhost:5000'}</div>
-          <div className="flex items-center gap-2"><Database size={12} className="text-cyan-400" /> Database: SQLite (tro_ly_ai.db)</div>
-          <div className="flex items-center gap-2"><Server size={12} className="text-amber-400" /> Frontend: {window.location.host || 'localhost:5173'}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-// ═══════════════════════════════════════════════════════════
 // TAB: USER MANAGEMENT
 // ═══════════════════════════════════════════════════════════
 const UsersTab = memo(function UsersTab({ token, currentUser, showToast, stats, statsLoading, fetchStats }) {
@@ -380,7 +343,7 @@ const ConversationsTab = memo(function ConversationsTab({ token, showToast }) {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchConvs(); fetchTrash(); }, []);
+  useEffect(() => { fetchConvs(); fetchTrash(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const viewMessages = async (convId) => {
     try {
@@ -566,10 +529,10 @@ const ApiKeysTab = memo(function ApiKeysTab({ token, showToast }) {
           setLastFullScan(latest?.lan_quet_cuoi || null);
         }
       }
-    } catch(e) { /* no scan data yet */ }
+    } catch { /* no scan data yet */ }
   };
 
-  useEffect(() => { fetchKeys(); fetchScanCache(); }, []);
+  useEffect(() => { fetchKeys(); fetchScanCache(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveKey = async () => {
     if (!newKey.trim()) return;
@@ -866,13 +829,14 @@ const SkillsTab = memo(function SkillsTab({ token, showToast }) {
       // Lấy TẤT CẢ skills (kể cả bị tắt) để admin có thể bật/tắt
       const data = await apiFetch('/services/skills/all', token);
       setSkills(Array.isArray(data) ? data : []);
-    } catch (e) {
+    } catch {
       // Fallback: lấy chỉ skills đang kích hoạt
       try { const data = await apiFetch('/services/skills', token); setSkills(Array.isArray(data) ? data : []); }
       catch (e2) { showToast(e2.message, 'error'); }
     } finally { setLoading(false); }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchSkills(); }, []);
 
   const toggleSkill = async (skill) => {
@@ -938,14 +902,14 @@ const SkillsTab = memo(function SkillsTab({ token, showToast }) {
 // ═══════════════════════════════════════════════════════════
 // TAB: ADMIN CHAT
 // ═══════════════════════════════════════════════════════════
-const AdminChatTab = memo(function AdminChatTab({ token, currentUser, showToast }) {
+const AdminChatTab = memo(function AdminChatTab({ token, showToast }) {
   const [convs, setConvs] = useState([]);
   const [selectedConv, setSelectedConv] = useState(null);
   const [messages, setMessages] = useState([]);
   const [reply, setReply] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [prevConvCount, setPrevConvCount] = useState(0);
-  const selectedConvRef = React.useRef(null);
+
 
   const fetchConvs = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -961,11 +925,12 @@ const AdminChatTab = memo(function AdminChatTab({ token, currentUser, showToast 
   };
 
   // Auto-refresh danh sách hội thoại mỗi 60s
+
   useEffect(() => {
     fetchConvs();
     const interval = setInterval(() => fetchConvs(true), 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectConv = async (convId) => {
     setSelectedConv(convId);
@@ -1055,6 +1020,7 @@ const SettingsTab = memo(function SettingsTab({ token, showToast }) {
     finally { setDiffLoading(false); }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchGit(); }, []);
 
   const runExec = async () => {
@@ -1595,12 +1561,13 @@ export default function AdminPanel({ token, currentUser, onClose }) {
   const [statsLoading, setStatsLoading] = useState(true);
   const [toast, setToast] = useState(null);
 
+
   useEffect(() => {
     if (!token || !currentUser || currentUser.phan_quyen !== 'admin') { 
       if (onClose) onClose(); 
       else window.location.href = '/'; 
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showToast = useCallback((message, type = 'success') => setToast({ message, type }), []);
 
@@ -1618,7 +1585,6 @@ export default function AdminPanel({ token, currentUser, onClose }) {
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
 
-  if (!token || !currentUser || currentUser.phan_quyen !== 'admin') return null;
 
   const tabContent = useMemo(() => {
     switch (activeTab) {
@@ -1626,7 +1592,7 @@ export default function AdminPanel({ token, currentUser, onClose }) {
       case 'conversations': return <ConversationsTab token={token} showToast={showToast} />;
       case 'apikeys': return <ApiKeysTab token={token} showToast={showToast} />;
       case 'skills': return <SkillsTab token={token} showToast={showToast} />;
-      case 'chat': return <AdminChatTab token={token} currentUser={currentUser} showToast={showToast} />;
+      case 'chat': return <AdminChatTab token={token} showToast={showToast} />;
       case 'iptv': return <IptvTab token={token} showToast={showToast} />;
       case 'github': return <GitHubTrending token={token} />;
       case 'settings': return <SettingsTab token={token} showToast={showToast} />;
@@ -1634,6 +1600,7 @@ export default function AdminPanel({ token, currentUser, onClose }) {
     }
   }, [activeTab, token, currentUser, showToast, stats, statsLoading, fetchStats]);
 
+  if (!token || !currentUser || currentUser.phan_quyen !== 'admin') return null;
   return (
     <div className="flex h-full w-full bg-[#0b0c10] text-slate-100 font-sans relative z-10 overflow-hidden">
       {/* Sleek Integrated Sub-Nav Sidebar */}

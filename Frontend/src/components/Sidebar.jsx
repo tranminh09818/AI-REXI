@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-   Menu, Plus, MessageSquare, Code, Folder, Tv, Monitor,
+   Menu, Plus, MessageSquare,
    Layers, Zap, Search, Trash2, ChevronDown, FolderOpen,
-   User, Settings, LogOut, Headphones, Shield, Bot, Globe, BookOpen
+   User, Settings, LogOut, Headphones, Shield, BookOpen
   } from 'lucide-react';
 
 const RexiLogo = ({ className = "w-8 h-8" }) => (
@@ -11,14 +11,14 @@ const RexiLogo = ({ className = "w-8 h-8" }) => (
 
 export default function Sidebar({
   sidebarOpen, setSidebarOpen,
-  activeTab, setActiveTab,
-  conversations, filteredConvs, searchQuery, setSearchQuery,
+  setActiveTab,
+  filteredConvs, searchQuery, setSearchQuery,
   activeConvId, setActiveConvId,
   handleNewConversation, handleDeleteConversation,
   filesDrawerOpen, setFilesDrawerOpen, renderTree, fileTree,
    setSkillsOpen, setSuperToolsOpen, setHelpOpen,
-  currentUser, setCurrentUser, setAuthToken, setAuthModalOpen, setSettingsOpen, setAdminOpen,
-  apiFetch, API_BASE, showToast, setConversations
+  currentUser, setCurrentUser, setAuthToken, setAuthModalOpen, setSettingsOpen,
+  apiFetch, showToast, setConversations
 }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);

@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Users, Shield, UserCheck, UserX, Server, Database, Activity,
-  RefreshCw, Home, MessageSquare, Trash2, Key, BarChart3,
+  Users, Shield, UserX, Server, Database, Activity,
+  RefreshCw, Home, MessageSquare, Trash2,
   Lock, Unlock, ChevronLeft, ChevronRight, Search, AlertTriangle,
-  CheckCircle, XCircle, Crown, User as UserIcon, Github
+  CheckCircle, XCircle, Crown, User as UserIcon
 } from 'lucide-react';
-import { API_BASE, apiFetch } from './config';
+import { apiFetch } from './config';
 import GitHubTrending from './components/GitHubTrending';
 
 // ─── Helper: API call với token ───────────────────────────
@@ -82,7 +82,7 @@ export default function AdminPage() {
     if (!token || !currentUser || currentUser.phan_quyen !== 'admin') {
       window.location.href = '/';
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
@@ -106,7 +106,6 @@ export default function AdminPage() {
   const [syncingProvider, setSyncingProvider] = useState(null);
   const [newProviderName, setNewProviderName] = useState('');
   const [newApiKey, setNewApiKey] = useState('');
-  const [aiModelsOpen, setAiModelsOpen] = useState(true);
 
   const showToast = (message, type = 'success') => setToast({ message, type });
 
@@ -149,7 +148,7 @@ export default function AdminPage() {
   useEffect(() => {
     fetchUsers(page, search);
     fetchStats();
-  }, [page, search]);
+  }, [page, search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Đổi Role ─────────────────────────────────────────────
   const changeRole = async (userId, newRole) => {
@@ -221,7 +220,7 @@ export default function AdminPage() {
           setModelsByProvider(grouped);
         }
       }
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
   }, [token]);
 
   const handleAddProvider = async () => {

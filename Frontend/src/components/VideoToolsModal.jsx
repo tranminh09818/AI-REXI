@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Play, Volume2, FileVideo, Globe, Wifi, ExternalLink, Copy } from 'lucide-react';
+import { X, Play, Volume2, Wifi, ExternalLink, Copy } from 'lucide-react';
 
 const VIDEO_TOOLS = [
   {

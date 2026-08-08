@@ -1,6 +1,6 @@
 import { apiFetch } from "../config";
 import React, { useState } from 'react';
-import { Globe, Search, Loader2, ExternalLink, CheckCircle, AlertTriangle, Clock, Image, Link, FileText, BarChart3 } from 'lucide-react';
+import { Globe, Search, Loader2, CheckCircle, AlertTriangle, Clock, Image, Link, FileText, BarChart3 } from 'lucide-react';
 
 
 export default function WebAnalyzer({ apiFetch: apiFetchProp, showToast }) {

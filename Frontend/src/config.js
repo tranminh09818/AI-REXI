@@ -44,7 +44,7 @@ export async function apiFetch(path, token, options = {}) {
     if (res.status === 401 && token && (data.code === 'INVALID_TOKEN' || data.code === 'LOGIN_REQUIRED')) {
       try {
         window.dispatchEvent(new CustomEvent('rexi_session_expired', { detail: data.error }));
-      } catch (e) {}
+      } catch {}
     }
     throw new Error(data.error || `HTTP ${res.status}`);
   }

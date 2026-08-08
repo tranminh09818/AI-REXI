@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Send, Mic, Paperclip, Volume2, Copy, Check, ArrowUp, ArrowDown, MessageSquare, Sparkles, ChevronDown, Layers, Zap, Square } from 'lucide-react';
+import { Send, Mic, Paperclip, Volume2, Copy, Check, ArrowUp, ArrowDown, Square } from 'lucide-react';
 
 function sanitizeHtml(html) {
   if (!html) return '';

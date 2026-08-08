@@ -1,9 +1,9 @@
-import { API_BASE, apiFetch } from '../config';
+import { apiFetch } from '../config';
 import React, { useEffect, useRef, useState } from 'react';
 import { Maximize2, X, RefreshCw, Search, Loader2, Zap, Bot } from 'lucide-react';
 
 
-export default function BrowserView({ token, onClose }) {
+export default function BrowserView({ onClose }) {
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
   const intentionalCloseRef = useRef(false);
@@ -12,7 +12,6 @@ export default function BrowserView({ token, onClose }) {
   const [loading, setLoading] = useState(false);
   const [url, setUrl] = useState('https://www.google.com');
   const [status, setStatus] = useState('disconnected');
-  const [aiMode, setAiMode] = useState(false);
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const frameCountRef = useRef(0);
@@ -56,7 +55,7 @@ export default function BrowserView({ token, onClose }) {
           };
           img.src = msg.data;
         }
-      } catch (e) {
+      } catch {
       }
     };
 
@@ -83,7 +82,7 @@ export default function BrowserView({ token, onClose }) {
     intentionalCloseRef.current = true;
     reconnectAttemptsRef.current = 0;
     if (wsRef.current) {
-      try { wsRef.current.close(); } catch (e) {}
+      try { wsRef.current.close(); } catch {}
       wsRef.current = null;
     }
     setConnected(false);
@@ -205,7 +204,7 @@ export default function BrowserView({ token, onClose }) {
     return () => {
       disconnectWS();
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const statusColors = {
     disconnected: 'text-slate-500',

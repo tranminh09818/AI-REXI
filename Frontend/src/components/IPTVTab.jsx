@@ -22,14 +22,6 @@ const IPTV_CATEGORIES = [
 
 const POPULAR_COUNTRIES = ['VN', 'US', 'GB', 'KR', 'JP', 'CN', 'TH', 'FR', 'DE', 'IN', 'RU', 'BR', 'AU', 'CA', 'HK', 'TW'];
 
-const codeToFlagEmoji = (code) => {
-  if (!code || code.length !== 2) return '🌍';
-  const upper = code.toUpperCase();
-  return String.fromCodePoint(
-    0x1F1E6 + upper.charCodeAt(0) - 65,
-    0x1F1E6 + upper.charCodeAt(1) - 65
-  );
-};
 
 const codeToTwemojiUrl = (code) => {
   if (!code || code.length !== 2) return null;
@@ -105,11 +97,11 @@ export default function IPTVTab({
     if (!iptvSubtitleOn) {
       // Stop capture
       if (mediaRecorderRef.current) {
-        try { mediaRecorderRef.current.stop(); } catch(e) {}
+        try { mediaRecorderRef.current.stop(); } catch {}
         mediaRecorderRef.current = null;
       }
       if (audioStreamRef.current) {
-        try { audioStreamRef.current.getTracks().forEach(t => t.stop()); } catch(e) {}
+        try { audioStreamRef.current.getTracks().forEach(t => t.stop()); } catch {}
         audioStreamRef.current = null;
       }
       setSubtitleText('');
@@ -203,7 +195,7 @@ export default function IPTVTab({
         recorder.onstop = () => {
           if (cancelled) return;
           if (iptvSubtitleOnRef.current) {
-            try { startRecorder(); } catch(e) {}
+            try { startRecorder(); } catch {}
           }
         };
         // Ghi liên tục, cứ ~5s phát chunk
@@ -220,8 +212,8 @@ export default function IPTVTab({
 
     return () => {
       cancelled = true;
-      if (recorder) { try { recorder.stop(); } catch(e) {} }
-      if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch(e) {} }
+      if (recorder) { try { recorder.stop(); } catch {} }
+      if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch {} }
       mediaRecorderRef.current = null;
       audioStreamRef.current = null;
     };
@@ -248,13 +240,14 @@ export default function IPTVTab({
       iptvVideoRef.current.removeAttribute('src');
       iptvVideoRef.current.load();
     }
-  }, [selectedChannel, iptvVideoRef]);
+  }, [selectedChannel, iptvVideoRef]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    const videoEl = iptvVideoRef.current;
     return () => {
-      if (iptvVideoRef?.current) {
-        iptvVideoRef.current.pause();
-        iptvVideoRef.current.removeAttribute('src');
+      if (videoEl) {
+        videoEl.pause();
+        videoEl.removeAttribute('src');
       }
     };
   }, [iptvVideoRef]);

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Download, Volume2, Mic, RotateCcw, RotateCw, Loader2, Clock, Type, Hash, ChevronDown, User, MapPin, SkipBack, SkipForward } from 'lucide-react';
+import { Play, Pause, Download, Volume2, Mic, RotateCw, Loader2, Clock, Type, Hash, User, MapPin } from 'lucide-react';
 
 const VN_VOICES = [
   { id: 'vi-VN-HoaiMyNeural', label: 'Hoài Mỹ', gender: 'Nữ', region: 'Bắc', color: 'rose' },
@@ -50,7 +50,6 @@ export default function StudioTab({ API_BASE, authToken, showToast }) {
   const textareaRef = useRef(null);
 
   const selectedVoice = VN_VOICES.find(v => v.id === voice);
-  const colors = VOICE_COLORS[selectedVoice?.color] || VOICE_COLORS.cyan;
 
   const formatRate = (v) => v >= 0 ? `+${v}%` : `${v}%`;
   const formatPitch = (v) => v >= 0 ? `+${v}Hz` : `${v}Hz`;
@@ -163,7 +162,7 @@ export default function StudioTab({ API_BASE, authToken, showToast }) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [text, voice, rate, pitch]);
+  }, [text, voice, rate, pitch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-[#0a0b0f]">

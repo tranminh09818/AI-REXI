@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE, apiFetch } from '../config';
 import {
   TrendingUp, Star, GitFork, ExternalLink, RefreshCw,
-  Search, Clock, ChevronDown, Users, Flame, Bookmark, BookmarkCheck,
+  Search, Clock, ChevronDown, Users, Flame,
   Volume2, VolumeX, Calendar, Tag, Bell, BellOff, CheckCheck, Sparkles,
-  X, Download, FileText, GitBranch, Rocket, Activity
+  X, Download, FileText, Rocket, Activity
 } from 'lucide-react';
 
 function GithubIcon({ size = 16, className = '' }) {
@@ -348,12 +348,10 @@ function RepoDetailModal({ repo, token, onClose }) {
 
   useEffect(() => {
     if (tab === 'stars') loadStars();
-  }, [tab]);
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!repo) return null;
   const fullName = repo.full_name;
-  const owner = (detail || repo).owner || fullName.split('/')[0];
-  const name = (detail || repo).name || fullName.split('/')[1];
 
   let readmeHtml = '';
   if (detail) {
@@ -362,7 +360,7 @@ function RepoDetailModal({ repo, token, onClose }) {
         ? decodeURIComponent(escape(atob(detail.readme)))
         : detail.readme || '';
       readmeHtml = mdToHtml(raw);
-    } catch (e) { readmeHtml = ''; }
+    } catch { readmeHtml = ''; }
   }
 
   return (
@@ -519,7 +517,6 @@ export default function GitHubTrending({ token }) {
   const [refreshing, setRefreshing] = useState(false);
   const [savedRepos, setSavedRepos] = useState([]);
   const [savedLoading, setSavedLoading] = useState(false);
-  const [savingKey, setSavingKey] = useState(null);
   const [view, setView] = useState('trending'); // 'trending' | 'saved'
   const [speakingKey, setSpeakingKey] = useState(null);
   const [notifications, setNotifications] = useState([]);
@@ -623,7 +620,7 @@ export default function GitHubTrending({ token }) {
         });
       }, 500);
     });
-  }, [fetchTrending]);
+  }, [fetchTrending]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchSaved = useCallback(async () => {
     setSavedLoading(true);
@@ -646,7 +643,7 @@ export default function GitHubTrending({ token }) {
         setNotifications(data.notifications || []);
         setUnreadCount(data.unread_count || 0);
       }
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
   }, [token]);
 
   useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
@@ -731,40 +728,9 @@ export default function GitHubTrending({ token }) {
         body: JSON.stringify({ ids }),
       });
       fetchNotifications();
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
   };
 
-  const handleToggleSave = async (repo) => {
-    const fullName = repo.full_name;
-    const isSaved = savedRepos.some(r => r.full_name === fullName);
-    setSavingKey(fullName);
-    try {
-      if (isSaved) {
-        await apiFetch(`/admin/github/saved/${fullName}`, token, { method: 'DELETE' });
-      } else {
-        await apiFetch('/admin/github/saved', token, {
-          method: 'POST',
-          body: JSON.stringify({
-            full_name: fullName,
-            owner: repo.owner || fullName.split('/')[0],
-            name: repo.name || fullName.split('/')[1],
-            description: repo.description || '',
-            language: repo.language || '',
-            stars: repo.stars || 0,
-            forks: repo.forks || 0,
-            stars_gained: repo.stars_gained || 0,
-            period: repo.period || '',
-            url: repo.url || `https://github.com/${fullName}`,
-          }),
-        });
-      }
-      await fetchSaved();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSavingKey(null);
-    }
-  };
 
   const displayRepos = view === 'saved'
     ? savedRepos.map((r, i) => ({ ...r, rank: i + 1 }))

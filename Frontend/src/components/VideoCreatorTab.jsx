@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   Video, Download, Loader2, Code,
-  Settings, Sparkles, Check, ArrowLeft, ArrowRight, Info, RefreshCw,
-  Monitor, Smartphone, Square, Play, ChevronDown, Palette, Type, Layers
+  Sparkles, Check, ArrowLeft, ArrowRight, Info,
+  Monitor, Smartphone, Square, Play, Palette, Type, Layers
 } from 'lucide-react';
 
 const FORMATS = [
@@ -270,7 +270,7 @@ export default function VideoCreatorTab({ API_BASE, authToken, showToast }) {
         const res = await fetch(`${API_BASE}/services/video/status`, { headers, credentials: 'include' });
         const data = await res.json();
         if (data.success) setStatus(data);
-      } catch (e) { setStatus(null); }
+      } catch { setStatus(null); }
     };
     checkStatus();
   }, [API_BASE, authToken]);
@@ -284,7 +284,7 @@ export default function VideoCreatorTab({ API_BASE, authToken, showToast }) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [step, rendering, videoUrl]);
+  }, [step, rendering, videoUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rebuildHtml = (tpl, flds, dur) => {
     const merged = tpl.fields.reduce((acc, f) => ({ ...acc, [f.key]: flds[f.key] ?? f.default }), {});
@@ -425,7 +425,6 @@ export default function VideoCreatorTab({ API_BASE, authToken, showToast }) {
       {/* Step Indicator */}
       <div className="flex items-center justify-center gap-1 px-4 py-2.5 border-b border-white/5 bg-[#0d0e12]">
         {STEPS.map((s, i) => {
-          const Icon = s.icon;
           return (
             <React.Fragment key={s.n}>
               {i > 0 && <div className={`w-8 h-px ${step > s.n ? 'bg-purple-500/60' : 'bg-white/10'}`} />}
