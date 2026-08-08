@@ -1905,8 +1905,8 @@ useEffect(() => {
         baseUrl={baseUrl} setBaseUrl={setBaseUrl}
       />
 
-      {/* ═══════════════════ FLOATING SPEED DIAL MENU (Chỉ hiện ở tab thường, ẩn hoàn toàn ở Admin) ═══════════════════ */}
-      {activeTab !== 'admin' && (
+      {/* ═══════════════════ FLOATING SPEED DIAL MENU (Hiển thị ở mọi tab, kể cả Admin) ═══════════════════ */}
+      {(
         <>
           {fabOpen && (
             <div
